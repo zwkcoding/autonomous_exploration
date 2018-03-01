@@ -34,7 +34,7 @@ int main(int argc, char **argv)
 			ROS_INFO("Action finished: %s", state.toString().c_str());
 			
 			visualization_msgs::Marker target_point;
-			target_point.header.frame_id = "map";
+			target_point.header.frame_id = "/local_map/local_map";
 			target_point.header.stamp = ros::Time::now();
 			target_point.ns = "points";
 			target_point.action = visualization_msgs::Marker::ADD;

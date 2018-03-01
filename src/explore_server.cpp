@@ -39,7 +39,7 @@ public:
 		mCurrentMap_.setLaserRange(laser_range);
 
 		int lethal_cost;
-		nh_.param("lethal_cost", lethal_cost, 65);
+		nh_.param("lethal_cost", lethal_cost, 100);
 		mCurrentMap_.setLethalCost(lethal_cost);
 
 		double gain;
@@ -59,6 +59,27 @@ public:
 		nh_.param("min_gain_threshold", minGain_, 8.);
 		nh_.param("gain_change", gainChangeFactor_, 1.5);
 
+		// todo zwk
+		// keep initial pose
+		double xinit_ = 0, yinit_ = 0;
+		TransformListener mTfListener_;
+		try {
+			std::string world_frame_id_ = "/odom";
+			Time now = Time::now();
+			mTfListener_.waitForTransform(world_frame_id_, std::string("/base_link"), Time(0), Duration(10.0));
+
+			tf::StampedTransform transform;
+			mTfListener_.lookupTransform(world_frame_id_, std::string("/base_link"), Time(0), transform);
+
+			 xinit_ = transform.getOrigin().x();
+			 yinit_ = transform.getOrigin().y();
+		}
+		catch(TransformException ex)
+		{
+			ROS_ERROR("[Node: explore_server]: Could not get robot position: %s", ex.what());
+		}
+		mCurrentMap_.setInitPisition(xinit_, yinit_);
+
 		as_.registerPreemptCallback(boost::bind(&ExploreAction::preemptCB, this));
 
 		as_.start();
@@ -73,8 +94,12 @@ public:
 	{
 		Rate loop_rate(4);
 
-		double current_gain = mCurrentMap_.getGainConst();
+		// zwk todo
+//		double current_gain = mCurrentMap_.getGainConst();
+		double current_gain = 35;
+
 		int count = 0;
+		double target_x, target_y;
 
 		while(ok() && as_.isActive() && current_gain >= minGain_)
 		{
@@ -101,6 +126,14 @@ public:
 
 			if(explore_target != -1) 
 			{
+				// add by zwk
+
+				mCurrentMap_.getOdomCoordinates(target_x, target_y, explore_target);
+
+				ROS_INFO("Got the explore goal: %f, %f\n", target_x, target_y);
+
+				break;
+
 				moveTo(explore_target);
 
 				if(count) 
@@ -118,10 +151,16 @@ public:
 			}
 		}
 
-		if(as_.isActive()) 
+		if(as_.isActive())
 		{
-			as_.setSucceeded(result_);
-			ROS_INFO("Exploration finished");
+			if( current_gain >= minGain_) {
+				result_.target.x = target_x ;
+				result_.target.y = target_y ;
+				as_.setSucceeded(result_);
+				ROS_INFO("Exploration finished");
+			} else {
+				ROS_INFO("Exploration failed : current info_gain is less than min");
+			}
 		}
 		else
 		{
@@ -228,6 +267,11 @@ private:
 
     bool moveTo(unsigned int goal_index)
     {
+
+		// add by zwk todo
+		ROS_INFO("Failed to reach the goal");
+		return false;
+
 		Rate loop_rate(8);
 
 		while(!ac_.waitForServer()) 
@@ -243,7 +287,7 @@ private:
 
 	   	move_base_msgs::MoveBaseGoal move_goal;
 
-		move_goal.target_pose.header.frame_id = "map";
+		move_goal.target_pose.header.frame_id = "local_map/local_map";
 		move_goal.target_pose.header.stamp = Time(0);
 
 		PoseWrap pose(x, y);

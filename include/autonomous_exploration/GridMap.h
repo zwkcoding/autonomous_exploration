@@ -17,7 +17,14 @@ typedef std::pair<double, unsigned int> Entry;
 
 class GridMap
 {
-public:    
+public:
+    // constructor for initialization
+    GridMap() {
+		world_frame_id_ = "/odom";
+		xinit_ = 0;
+		yinit_ = 0;
+    }
+
 	void generateMap() {
 		boost::posix_time::ptime current_time = Time::now().toBoost();
 		std::string name = boost::posix_time::to_iso_extended_string(current_time);
@@ -76,21 +83,21 @@ public:
 
 	bool getCurrentPosition(unsigned int &index) 
 	{
-		TransformListener mTfListener_;
+        TransformListener mTfListener_;
 	    try
 	    {
 		   	Time now = Time::now();
-		   	mTfListener_.waitForTransform(std::string("map"), 
-										  std::string("base_footprint"), 
-										  Time(0), Duration(10.0));
+		   	mTfListener_.waitForTransform(world_frame_id_,
+										  std::string("/base_link"),
+										  Time(0), Duration(5.0));
 
 	        tf::StampedTransform transform;
-		   	mTfListener_.lookupTransform(std::string("map"), 
-										 std::string("base_footprint"), 
+		   	mTfListener_.lookupTransform(world_frame_id_,
+										 std::string("/base_link"),
 										 Time(0), transform);
 
-	    	double x = transform.getOrigin().x();
-	    	double y = transform.getOrigin().y();
+	    	double x = transform.getOrigin().x() - xinit_;
+	    	double y = transform.getOrigin().y() - yinit_;
 	    	double w = tf::getYaw(transform.getRotation());
 
 	    	unsigned int X = (x - getOriginX()) / getResolution();
@@ -202,6 +209,7 @@ public:
 		ROS_DEBUG("Current cell area minVal: %d", minVal);
 		ROS_DEBUG("Current cell area maxVal: %d", maxVal);
 
+		// todo zwk
 		if(maxVal < mLethalCost && minVal > -1) return true;
 		return false;
 	}
@@ -307,8 +315,8 @@ public:
 						queue.insert(Entry(distance + 1, ind[i]));
 					}
 				}
-
-			    if(value > 0) use_cells++;
+				// fix by zwk
+			    if(value == -1) use_cells++;
 			}
 
 		}
@@ -384,6 +392,8 @@ public:
 	
 	std::string getPath() { return mPath; }
 	void setPath(std::string s) { mPath = s; }
+
+	void setInitPisition(double xinit, double yinit) { xinit_ = xinit; yinit_ = yinit;}
 	
 
 private:
@@ -395,6 +405,11 @@ private:
 	char mLethalCost;
 	double mGainConst;
 	std::string mPath;
-};           
+
+	// reserve initial position
+	std::string world_frame_id_ ;
+    double xinit_;
+    double yinit_;
+};
 
 #endif

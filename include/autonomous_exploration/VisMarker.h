@@ -12,7 +12,7 @@ class VisMarker
 {
 public:
 	VisMarker() {
-		marker.header.frame_id = "map";
+		marker.header.frame_id = "/local_map/local_map";
         marker.header.stamp = Time::now();
         marker.ns = "none";
         marker.action = visualization_msgs::Marker::ADD;

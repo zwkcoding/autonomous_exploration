@@ -67,7 +67,7 @@ int main(int argc, char **argv)
 	init(argc, argv, "map_server");
 	NodeHandle n;
 
-	Subscriber sub = n.subscribe("map", 10, mapUpdate);
+	Subscriber sub = n.subscribe("/local_map/local_map", 10, mapUpdate);
 
 	ServiceServer ss = n.advertiseService("current_map", mapCallback);
 

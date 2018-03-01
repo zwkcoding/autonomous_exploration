@@ -15,6 +15,10 @@ using namespace ros;
 typedef std::multimap<double, unsigned int> Queue;
 typedef std::pair<double, unsigned int> Entry;
 
+#define  LETHAL_OBSTACLE 100
+#define  NO_INFORMATION -1
+#define  FREE_SPACE 0
+
 class GridMap
 {
 public:
@@ -316,7 +320,7 @@ public:
 					}
 				}
 				// fix by zwk
-			    if(value == -1) use_cells++;
+			    if(value == NO_INFORMATION) use_cells++;
 			}
 
 		}

@@ -10,6 +10,7 @@
 #include <actionlib/server/simple_action_server.h>
 #include <actionlib/client/simple_action_client.h>
 #include <actionlib/client/terminal_state.h>
+#include <opt_utils/opt_utils.hpp>
 
 #include <autonomous_exploration/ExploreAction.h>
 #include <autonomous_exploration/GridMap.h>
@@ -42,9 +43,8 @@ public:
 		nh_.param("lethal_cost", lethal_cost, 100);
 		mCurrentMap_.setLethalCost(lethal_cost);
 
-		double gain;
-		nh_.param("gain_threshold", gain, 35.);
-		mCurrentMap_.setGainConst(gain);
+		nh_.param("gain_threshold", initial_gain_, 10.);
+		mCurrentMap_.setGainConst(initial_gain_);
 		
 		double robot_radius;
 		nh_.param("robot_radius", robot_radius, 0.19);
@@ -56,7 +56,7 @@ public:
 		mCurrentMap_.setPath(map_path);
 
 		nh_.param("min_distance", minDistance_, 1.);
-		nh_.param("min_gain_threshold", minGain_, 8.);
+		nh_.param("min_gain_threshold", minGain_, 2.);
 		nh_.param("gain_change", gainChangeFactor_, 1.5);
 
 		// todo zwk
@@ -96,7 +96,7 @@ public:
 
 		// zwk todo
 //		double current_gain = mCurrentMap_.getGainConst();
-		double current_gain = 35;
+		double current_gain = initial_gain_;
 
 		int count = 0;
 		double target_x, target_y;
@@ -122,7 +122,10 @@ public:
 				return;
 			}
 
+			auto start = hmpl::now();
 			int explore_target = explore(&mCurrentMap_, pos_index);
+			auto end = hmpl::now();
+			std::cout << "once explore cost time:" << hmpl::getDurationInSecs(start, end) << "\n";
 
 			if(explore_target != -1) 
 			{
@@ -131,6 +134,7 @@ public:
 				mCurrentMap_.getOdomCoordinates(target_x, target_y, explore_target);
 
 				ROS_INFO("Got the explore goal: %f, %f\n", target_x, target_y);
+				ROS_INFO("adjust info gain numbers and cur info: %d, %f\n", count, current_gain);
 
 				break;
 
@@ -159,11 +163,13 @@ public:
 				as_.setSucceeded(result_);
 				ROS_INFO("Exploration finished");
 			} else {
+				as_.setAborted();
 				ROS_INFO("Exploration failed : current info_gain is less than min");
 			}
 		}
 		else
 		{
+			as_.setAborted();
 			ROS_INFO("Exploration was interrupted");
 		}
     }
@@ -171,7 +177,7 @@ public:
 	void preemptCB() 
 	{
 		ROS_INFO("Server received a cancel request.");
-		mCurrentMap_.generateMap();
+//		mCurrentMap_.generateMap();
 		goalReached_ = -1;
 		ac_.cancelGoal();
 		as_.setPreempted();
@@ -200,6 +206,7 @@ private:
 		ROS_INFO("Cleared the area");
 
 	    unsigned int mapSize = map->getSize();
+		// represent visit flag table
 	    double *plan = new double[mapSize];
 	    for(unsigned int i = 0; i<mapSize; i++)
 	    {
@@ -224,6 +231,7 @@ private:
 		    queue.erase(next);
 
 			ROS_DEBUG("Target distance: %f", distance);
+			//todo zwk improve it
 		    if(distance > minDistance_ && map->isFrontier(index))
 		    {
 				foundFrontier = index;
@@ -371,6 +379,7 @@ protected:
     GridMap mCurrentMap_;
 	double minDistance_;
 	double minGain_;
+	double initial_gain_;
 	double gainChangeFactor_;
     int goalReached_;
 

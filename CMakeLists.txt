@@ -15,6 +15,7 @@ find_package(catkin REQUIRED COMPONENTS
   geometry_msgs
   nav_msgs
   visualization_msgs
+  opt_utils
 )
 
 find_package(Boost REQUIRED COMPONENTS system)

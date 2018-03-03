@@ -165,7 +165,7 @@ public:
 		unsigned int yCenter;
 		getCoordinates(xCenter, yCenter, center);
 
-		int radius = ceil(mRobotRadius / getResolution() / 100.0);
+		int radius = ceil(mRobotRadius / getResolution());
 
 		int vx[2], vy[2];
 		for(int x = xCenter - radius; x <= xCenter; ++x)
@@ -214,7 +214,7 @@ public:
 		ROS_DEBUG("Current cell area maxVal: %d", maxVal);
 
 		// todo zwk
-		if(maxVal < mLethalCost && minVal > -1) return true;
+		if(maxVal < mLethalCost) return true;
 		return false;
 	}
 

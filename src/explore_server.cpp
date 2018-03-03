@@ -47,7 +47,7 @@ public:
 		mCurrentMap_.setGainConst(initial_gain_);
 		
 		double robot_radius;
-		nh_.param("robot_radius", robot_radius, 0.19);
+		nh_.param("robot_radius", robot_radius, 3.);
 		mCurrentMap_.setRobotRadius(robot_radius);
 
 		std::string map_path;
@@ -56,7 +56,7 @@ public:
 		mCurrentMap_.setPath(map_path);
 
 		nh_.param("min_distance", minDistance_, 1.);
-		nh_.param("min_gain_threshold", minGain_, 2.);
+		nh_.param("min_gain_threshold", minGain_, 0.5);
 		nh_.param("gain_change", gainChangeFactor_, 1.5);
 
 		// todo zwk
@@ -101,6 +101,7 @@ public:
 		int count = 0;
 		double target_x, target_y;
 
+		auto start = hmpl::now();
 		while(ok() && as_.isActive() && current_gain >= minGain_)
 		{
 			loop_rate.sleep();
@@ -122,10 +123,8 @@ public:
 				return;
 			}
 
-			auto start = hmpl::now();
+
 			int explore_target = explore(&mCurrentMap_, pos_index);
-			auto end = hmpl::now();
-			std::cout << "once explore cost time:" << hmpl::getDurationInSecs(start, end) << "\n";
 
 			if(explore_target != -1) 
 			{
@@ -154,6 +153,9 @@ public:
 				ROS_INFO("Gain was decreased to: %f", current_gain);
 			}
 		}
+
+		auto end = hmpl::now();
+		std::cout << "once explore cost time:" << hmpl::getDurationInSecs(start, end) << "\n";
 
 		if(as_.isActive())
 		{

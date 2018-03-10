@@ -11,6 +11,7 @@
 #include <actionlib/client/simple_action_client.h>
 #include <actionlib/client/terminal_state.h>
 #include <opt_utils/opt_utils.hpp>
+#include "autonomous_exploration/bfs_frontier_search.hpp"
 
 #include <autonomous_exploration/ExploreAction.h>
 #include <autonomous_exploration/GridMap.h>
@@ -22,7 +23,7 @@ typedef actionlib::SimpleActionClient<move_base_msgs::MoveBaseAction> MoveBaseCl
 
 using namespace tf;
 using namespace ros;
-
+using namespace frontier_exploration;
 class ExploreAction {
 
 public:
@@ -32,22 +33,23 @@ public:
 		action_name_(name),
 		ac_("move_base", true)
 	{
-		mMarkerPub_ = nh_.advertise<visualization_msgs::Marker>("vis_marker", 2);
+//		mMarkerPub_ = nh_.advertise<visualization_msgs::Marker>("vis_marker", 2);
+		mMarkerPub_ = nh_.advertise<visualization_msgs::MarkerArray>("vis_marker", 2);
 		mGetMapClient_ = nh_.serviceClient<nav_msgs::GetMap>(std::string("current_map"));
 
 		double laser_range;
-		nh_.param("laser_max_range", laser_range, 2.);
+		nh_.param("laser_max_range", laser_range, 8.);
 		mCurrentMap_.setLaserRange(laser_range);
 
 		int lethal_cost;
 		nh_.param("lethal_cost", lethal_cost, 100);
 		mCurrentMap_.setLethalCost(lethal_cost);
 
-		nh_.param("gain_threshold", initial_gain_, 10.);
+		nh_.param("gain_threshold", initial_gain_, 30.);
 		mCurrentMap_.setGainConst(initial_gain_);
 		
 		double robot_radius;
-		nh_.param("robot_radius", robot_radius, 3.);
+		nh_.param("robot_radius", robot_radius, 2.);
 		mCurrentMap_.setRobotRadius(robot_radius);
 
 		std::string map_path;
@@ -55,29 +57,32 @@ public:
 		nh_.param("map_path", map_path, temp);
 		mCurrentMap_.setPath(map_path);
 
-		nh_.param("min_distance", minDistance_, 1.);
+		nh_.param("min_distance", minDistance_, 5.);
 		nh_.param("min_gain_threshold", minGain_, 0.5);
 		nh_.param("gain_change", gainChangeFactor_, 1.5);
 
 		// todo zwk
 		// keep initial pose
 		double xinit_ = 0, yinit_ = 0;
-		TransformListener mTfListener_;
-		try {
-			std::string world_frame_id_ = "/odom";
-			Time now = Time::now();
-			mTfListener_.waitForTransform(world_frame_id_, std::string("/base_link"), Time(0), Duration(10.0));
+		tf::TransformListener mTfListener;
+		tf::StampedTransform transform;
+		std::string world_frame_id_ = "/odom";
+		int temp0 = 0;
+		// wait here until receive tf tree
+		while (temp0 == 0) {
+			try {
+				temp0 = 1;
+				mTfListener.lookupTransform(world_frame_id_, std::string("/base_link"), ros::Time(0), transform);
+			} catch (tf::TransformException ex) {
+				temp0 = 0;
+				ros::Duration(0.1).sleep();
+                ROS_INFO("no tf tree is received!");
 
-			tf::StampedTransform transform;
-			mTfListener_.lookupTransform(world_frame_id_, std::string("/base_link"), Time(0), transform);
+            }
+		}
+		xinit_ = transform.getOrigin().x();
+		yinit_ = transform.getOrigin().y();
 
-			 xinit_ = transform.getOrigin().x();
-			 yinit_ = transform.getOrigin().y();
-		}
-		catch(TransformException ex)
-		{
-			ROS_ERROR("[Node: explore_server]: Could not get robot position: %s", ex.what());
-		}
 		mCurrentMap_.setInitPisition(xinit_, yinit_);
 
 		as_.registerPreemptCallback(boost::bind(&ExploreAction::preemptCB, this));
@@ -124,8 +129,8 @@ public:
 			}
 
 
-			int explore_target = explore(&mCurrentMap_, pos_index);
-
+//			int explore_target = exploreByInfoGain(&mCurrentMap_, pos_index);
+            int explore_target =  exploreByBfs(&mCurrentMap_, pos_index);
 			if(explore_target != -1) 
 			{
 				// add by zwk
@@ -181,7 +186,7 @@ public:
 		ROS_INFO("Server received a cancel request.");
 //		mCurrentMap_.generateMap();
 		goalReached_ = -1;
-		ac_.cancelGoal();
+//		ac_.cancelGoal();
 		as_.setPreempted();
 	}    
 	
@@ -200,7 +205,7 @@ public:
     }
 
 private:
-    int explore(GridMap *map, unsigned int start)
+    int exploreByInfoGain(GridMap *map, unsigned int start)
     {
 	    ROS_INFO("Starting exploration");
 
@@ -225,7 +230,9 @@ private:
 	    double linear = map->getResolution();
 	    int foundFrontier = 0;
 
-	    while(!queue.empty() && !foundFrontier && goalReached_ != 2) 
+		std::vector<unsigned int> frontier_array, search_array;
+
+	    while(!queue.empty() /*&& !foundFrontier*/ && goalReached_ != 2)
 	    {
 		    next = queue.begin();
 		    distance = next->first;
@@ -233,11 +240,12 @@ private:
 		    queue.erase(next);
 
 			ROS_DEBUG("Target distance: %f", distance);
-			//todo zwk improve it
+
 		    if(distance > minDistance_ && map->isFrontier(index))
 		    {
 				foundFrontier = index;
-				publishMarker(index, 2);
+//				publishMarker(index, 2);
+				frontier_array.push_back(index);
 		    }
 		    else
 		    {
@@ -251,12 +259,13 @@ private:
 			    for(unsigned int it = 0; it<4; ++it)
 			    {
 				    unsigned int i = ind[it];
-				    if(map->isFree(i) && plan[i] == -1) 
+				    if(map->isFree(i) && plan[i] == -1)  // free and unvisited, then insert
 				    {
 					    queue.insert(Entry(distance+linear, i));
 					    plan[i] = distance+linear;
 
-						publishMarker(index, 1);
+//						publishMarker(index, 1);
+						search_array.push_back(index);
 				    }
 			    }
 		    }
@@ -265,19 +274,76 @@ private:
 	    delete [] plan;
 		queue.clear();
 
+
 	    if(foundFrontier) 
 	    {
+//			publishMarkerArray(frontier_array, 2);
 		    return foundFrontier;
 	    }
 	    else
 	    {
+//			publishMarkerArray(search_array, 1);
 			return -1;
 	    }
     }
 
+    int exploreByBfs(GridMap *map, unsigned int start) {
+        ROS_INFO("Starting exploration");
+
+        map->clearArea(start);
+        ROS_INFO("Cleared the area");
+        FrontierSearch bfs_searcher(map->getMap());
+        std::list<Frontier> frontier_list = bfs_searcher.searchFrom(start);
+        ROS_INFO("frontier_list size: %d", frontier_list.size());
+
+        //create placeholder for selected frontier
+        Frontier selected;
+        selected.min_distance = std::numeric_limits<double>::infinity();
+
+        std::vector<unsigned int> frontier_array_centroid, type_array;
+        unsigned int type = 0, max = 0;
+        float originX = map->getOriginX();
+        float originY = map->getOriginY();
+        float resolution = map->getResolution();
+        BOOST_FOREACH(Frontier frontier, frontier_list) {
+                        BOOST_FOREACH(geometry_msgs::Point point, frontier.point_array) {
+                                        float x = point.x;
+                                        float y = point.y;
+                                        unsigned int index;
+
+                                        unsigned int X = (x - originX) / resolution;
+                                        unsigned int Y = (y - originY) / resolution;
+
+                                        map->getIndex(X, Y, index);
+                                        frontier_array_centroid.push_back(index);
+                                        type_array.push_back(type);
+                                    }
+                        float x = frontier.centroid.x;
+                        float y = frontier.centroid.y;
+                        unsigned int index;
+
+                        unsigned int X = (x - originX) / resolution;
+                        unsigned int Y = (y - originY) / resolution;
+
+                        map->getIndex(X, Y, index);
+                        frontier_array_centroid.push_back(index);  // insert centroid
+                        type_array.push_back(type);
+                        //check if this frontier is the nearest to robot
+                        if (frontier.min_distance < selected.min_distance){
+                            selected = frontier;
+                            max = frontier_array_centroid.size() - 1;
+                        }
+                        type++;
+                    }
+        publishMarkerArray(frontier_array_centroid, type_array);
+        if(frontier_list.size() > 0)
+            return frontier_array_centroid[max];
+        else
+            return -1;
+    }
+
     bool moveTo(unsigned int goal_index)
     {
-
 		// add by zwk todo
 		ROS_INFO("Failed to reach the goal");
 		return false;
@@ -367,7 +433,43 @@ private:
 		}
 
 		mMarkerPub_.publish(marker.getMarker());
-	}	
+	}
+
+    void publishMarkerArray(const std::vector<unsigned int> &index_array, std::vector<unsigned int> type) {
+		visualization_msgs::MarkerArray markersMsg;
+        for(int i = 0; i < index_array.size(); i++) {
+            double x, y;
+            mCurrentMap_.getOdomCoordinates(x, y, index_array[i]);
+            PoseWrap pose(x, y);
+
+            VisMarker marker;
+            /*
+              type:
+                1: free area
+                2: frontier
+            */
+            type[i] = type[i] % 4;
+            if (type[i] == 0) {
+                Color color(0, 0, 0.7);
+                marker.setParams("frontier", pose.getPose(), 0.35, color.getColor(), i);
+            } else if (type[i] == 1) {
+                Color color(0, 0.7, 0);
+                marker.setParams("frontier", pose.getPose(), 0.35, color.getColor(), i);
+            } else if (type[i] == 2) {
+                Color color(0.7, 0, 0);
+                marker.setParams("frontier", pose.getPose(), 0.35, color.getColor(), i);
+            } else if (type[i] == 3) {
+                Color color(0, 1.0, 0);
+                marker.setParams("frontier", pose.getPose(), 0.35, color.getColor(), i);
+            } else {
+                ROS_WARN("TYPE INDEX ERROR!");
+            }
+
+			markersMsg.markers.push_back(marker.getMarker());
+        }
+		mMarkerPub_.publish(markersMsg);
+	}
+
 
 protected:
     NodeHandle nh_;

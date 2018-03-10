@@ -12,6 +12,7 @@ nav_msgs::GetMap::Response map_;
 boost::mutex map_mutex;
 bool got_map;
 
+// todo could make changes on map(ROI, replace value...)here
 void mapUpdate(const nav_msgs::OccupancyGrid::ConstPtr &map)
 {
 	ROS_DEBUG("Updating a map");
@@ -67,7 +68,7 @@ int main(int argc, char **argv)
 	init(argc, argv, "map_server");
 	NodeHandle n;
 
-	Subscriber sub = n.subscribe("/local_map/local_map", 10, mapUpdate);
+	Subscriber sub = n.subscribe("/global_map", 10, mapUpdate);
 
 	ServiceServer ss = n.advertiseService("current_map", mapCallback);
 

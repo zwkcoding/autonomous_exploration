@@ -2,12 +2,15 @@
 #define GRID_MAP_H
 
 #include <cstdio>
+#include "boost/date_time/posix_time/posix_time.hpp"
+
 #include "ros/ros.h"
 #include "ros/console.h"
 #include "nav_msgs/OccupancyGrid.h"
 #include "tf/LinearMath/Matrix3x3.h"
 #include "geometry_msgs/Quaternion.h"
-#include "boost/date_time/posix_time/posix_time.hpp"
+#include <tf/transform_listener.h>
+
 
 using namespace tf;
 using namespace ros;
@@ -87,39 +90,33 @@ public:
 
 	bool getCurrentPosition(unsigned int &index) 
 	{
-        TransformListener mTfListener_;
-	    try
-	    {
-		   	Time now = Time::now();
-		   	mTfListener_.waitForTransform(world_frame_id_,
-										  std::string("/base_link"),
-										  Time(0), Duration(5.0));
+        tf::TransformListener mTfListener;
+        tf::StampedTransform transform;
+        int temp = 0;
+        while (temp == 0) {
+			try {
+                temp = 1;
+                mTfListener.lookupTransform(world_frame_id_, std::string("/base_link"), ros::Time(0), transform);
+            } catch (tf::TransformException ex) {
+                temp = 0;
+                ros::Duration(0.1).sleep();
+                ROS_INFO("no tf tree is received!");
+            }
+        }
+        double x = transform.getOrigin().x() - xinit_;
+        double y = transform.getOrigin().y() - yinit_;
+        double w = tf::getYaw(transform.getRotation());
 
-	        tf::StampedTransform transform;
-		   	mTfListener_.lookupTransform(world_frame_id_,
-										 std::string("/base_link"),
-										 Time(0), transform);
+        unsigned int X = (x - getOriginX()) / getResolution();
+        unsigned int Y = (y - getOriginY()) / getResolution();
 
-	    	double x = transform.getOrigin().x() - xinit_;
-	    	double y = transform.getOrigin().y() - yinit_;
-	    	double w = tf::getYaw(transform.getRotation());
+        if(!getIndex(X, Y, index))
+        {
+            ROS_ERROR("Is the robot out of the map?");
+            return false;
+        }
 
-	    	unsigned int X = (x - getOriginX()) / getResolution();
-	    	unsigned int Y = (y - getOriginY()) / getResolution();
-	
-	    	if(!getIndex(X, Y, index))
-	    	{
-		   		ROS_ERROR("Is the robot out of the map?");
-		   		return false;
-	    	}
-	    			
-			ROS_INFO("Robot's coordinates are %d, %d \n", X, Y);
-	    }
-	    catch(TransformException ex)
-	    {
-			ROS_ERROR("Could not get robot position: %s", ex.what());
-		   	return false;
-		}
+        ROS_INFO("Robot's coordinates are %d, %d \n", X, Y);
 
 	    return true;
     }
@@ -214,7 +211,7 @@ public:
 		ROS_DEBUG("Current cell area maxVal: %d", maxVal);
 
 		// todo zwk
-		if(maxVal < mLethalCost) return true;
+		if(maxVal < mLethalCost || minVal > -1 ) return true;
 		return false;
 	}
 

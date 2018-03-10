@@ -35,7 +35,8 @@ generate_messages(
 )
 
 catkin_package(
-  CATKIN_DEPENDS actionlib_msgs 
+  CATKIN_DEPENDS actionlib_msgs
+  DEPENDS Boost
 )
 
 include_directories(
@@ -48,7 +49,7 @@ add_executable(explore_client src/explore_client.cpp)
 target_link_libraries(explore_client ${catkin_LIBRARIES})
 add_dependencies(explore_client ${autonomous_exploration_EXPORTED_TARGETS})
 
-add_executable(explore_server src/explore_server.cpp)
+add_executable(explore_server src/explore_server.cpp src/bfs_frontier_search.cpp)
 target_link_libraries(explore_server ${catkin_LIBRARIES})
 add_dependencies(explore_server ${autonomous_exploration_EXPORTED_TARGETS})
 

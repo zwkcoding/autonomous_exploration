@@ -3,6 +3,7 @@
 
 #include<ros/ros.h>
 #include<visualization_msgs/Marker.h>
+#include<visualization_msgs/MarkerArray.h>
 #include<geometry_msgs/Twist.h>
 #include<std_msgs/ColorRGBA.h>
 
@@ -13,8 +14,8 @@ class VisMarker
 public:
 	VisMarker() {
 		marker.header.frame_id = "/local_map/local_map";
-        marker.header.stamp = Time::now();
-        marker.ns = "none";
+        marker.header.stamp = Time(0);
+//        marker.ns = "none";
         marker.action = visualization_msgs::Marker::ADD;
         marker.type = visualization_msgs::Marker::CYLINDER;
         marker.pose.orientation.w = 1.0;
@@ -23,10 +24,12 @@ public:
 		marker.color.a = 1.0; 		
 	}
 
-	void setParams(std::string ns, geometry_msgs::Pose pose, double scale, std_msgs::ColorRGBA color, int type = 3) {
-		marker.ns = ns;
+	void setParams(std::string ns, geometry_msgs::Pose pose, double scale, std_msgs::ColorRGBA color, int id = 0, int type = 3) {
+		marker.id = id;
+        marker.ns = ns;
 		marker.pose = pose;
 		marker.scale.x = marker.scale.y = scale;
+        marker.scale.z = 0.2;
 		marker.color = color;
 		marker.type = type;
 	}
@@ -38,6 +41,8 @@ public:
 protected:
 	visualization_msgs::Marker marker;
 };
+
+
 
 #endif
 

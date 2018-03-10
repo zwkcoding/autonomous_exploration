@@ -25,7 +25,7 @@ int main(int argc, char **argv)
 	do {
 		ac.sendGoal(goal);
 
-		success = ac.waitForResult(ros::Duration(30.0));
+		success = ac.waitForResult(ros::Duration(60.0));
 
 		if(success) 
 		{

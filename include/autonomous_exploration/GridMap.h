@@ -18,7 +18,7 @@ using namespace ros;
 typedef std::multimap<double, unsigned int> Queue;
 typedef std::pair<double, unsigned int> Entry;
 
-#define  LETHAL_OBSTACLE 100
+#define  LETHAL_OBSTACLE 70
 #define  NO_INFORMATION -1
 #define  FREE_SPACE 0
 
@@ -211,7 +211,7 @@ public:
 		ROS_DEBUG("Current cell area maxVal: %d", maxVal);
 
 		// todo zwk
-		if(maxVal < mLethalCost || minVal > -1 ) return true;
+		if(maxVal < mLethalCost) return true;
 		return false;
 	}
 

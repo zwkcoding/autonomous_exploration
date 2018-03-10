@@ -24,14 +24,15 @@ public:
 		marker.color.a = 1.0; 		
 	}
 
-	void setParams(std::string ns, geometry_msgs::Pose pose, double scale, std_msgs::ColorRGBA color, int id = 0, int type = 3) {
+	void setParams(std::string ns, geometry_msgs::Pose pose, double scale, std_msgs::ColorRGBA color, int id = 0, float alpha = 1.0, int type = 3) {
 		marker.id = id;
         marker.ns = ns;
 		marker.pose = pose;
 		marker.scale.x = marker.scale.y = scale;
         marker.scale.z = 0.2;
 		marker.color = color;
-		marker.type = type;
+        marker.color.a = alpha;
+        marker.type = type;
 	}
 
 	visualization_msgs::Marker getMarker() {

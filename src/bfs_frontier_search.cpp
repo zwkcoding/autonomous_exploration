@@ -66,11 +66,18 @@ namespace frontier_exploration {
                                 }
                                 //check if cell is new frontier cell (unvisited, NO_INFORMATION, free neighbour)
                             } else if (isNewFrontierCell(nbr, frontier_flag)) {
+                                indexToReal(map_, nbr, extend_x, extend_y);
+                                float dist = pow((pow((extend_x - ref_x), 2) + pow((extend_y - ref_y), 2)), 0.5);
                                 frontier_flag[nbr] = true;
-                                Frontier new_frontier = buildNewFrontier(nbr, pos, frontier_flag);
-                                // todo consider vehicle width pass ability
-                                if (new_frontier.size > 30) {
-                                    frontier_list.push_back(new_frontier);
+                                // todo use minimal distance
+                                if(dist > 3) {
+                                    Frontier new_frontier = buildNewFrontier(nbr, pos, frontier_flag);
+                                    // todo consider vehicle width pass ability
+                                    if(1) {
+                                        if (new_frontier.size > 30) {
+                                            frontier_list.push_back(new_frontier);
+                                        }
+                                    }
                                 }
                             }
                         }

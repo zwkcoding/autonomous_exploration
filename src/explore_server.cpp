@@ -42,7 +42,7 @@ public:
 		mCurrentMap_.setLaserRange(laser_range);
 
 		int lethal_cost;
-		nh_.param("lethal_cost", lethal_cost, 100);
+		nh_.param("lethal_cost", lethal_cost, 70);
 		mCurrentMap_.setLethalCost(lethal_cost);
 
 		nh_.param("gain_threshold", initial_gain_, 30.);
@@ -300,24 +300,14 @@ private:
         Frontier selected;
         selected.min_distance = std::numeric_limits<double>::infinity();
 
-        std::vector<unsigned int> frontier_array_centroid, type_array;
-        unsigned int type = 0, max = 0;
+        std::vector<unsigned int> frontier_array_centroid;
+        std::vector<int> type_array;
+        int type = 0, max = 0;
         float originX = map->getOriginX();
         float originY = map->getOriginY();
         float resolution = map->getResolution();
         BOOST_FOREACH(Frontier frontier, frontier_list) {
-                        BOOST_FOREACH(geometry_msgs::Point point, frontier.point_array) {
-                                        float x = point.x;
-                                        float y = point.y;
-                                        unsigned int index;
 
-                                        unsigned int X = (x - originX) / resolution;
-                                        unsigned int Y = (y - originY) / resolution;
-
-                                        map->getIndex(X, Y, index);
-                                        frontier_array_centroid.push_back(index);
-                                        type_array.push_back(type);
-                                    }
                         float x = frontier.centroid.x;
                         float y = frontier.centroid.y;
                         unsigned int index;
@@ -327,14 +317,54 @@ private:
 
                         map->getIndex(X, Y, index);
                         frontier_array_centroid.push_back(index);  // insert centroid
-                        type_array.push_back(type);
+                        type_array.push_back(type + 1);
                         //check if this frontier is the nearest to robot
-                        if (frontier.min_distance < selected.min_distance){
-                            selected = frontier;
-                            max = frontier_array_centroid.size() - 1;
+//                        if (frontier.min_distance < selected.min_distance){
+//                            selected = frontier;
+//                            max = frontier_array_centroid.size() - 1;
+//                        }
+//
+                        x = frontier.middle.x;
+                        y = frontier.middle.y;
+                        X = (x - originX) / resolution;
+                        Y = (y - originY) / resolution;
+                        map->getIndex(X, Y, index);
+                        frontier_array_centroid.push_back(index);  // insert middle
+                        type_array.push_back(type + 2);
+                        // judge pass ability
+                        if(map->isFree(index)) {
+                            // show invaid frontiers
+                            BOOST_FOREACH(geometry_msgs::Point point, frontier.point_array) {
+                                            float x = point.x;
+                                            float y = point.y;
+                                            unsigned int index;
+
+                                            unsigned int X = (x - originX) / resolution;
+                                            unsigned int Y = (y - originY) / resolution;
+
+                                            map->getIndex(X, Y, index);
+                                            frontier_array_centroid.push_back(index);
+                                            type_array.push_back(type);
+                                        }
+                        } else {
+                            BOOST_FOREACH(geometry_msgs::Point point, frontier.point_array) {
+                                            float x = point.x;
+                                            float y = point.y;
+                                            unsigned int index;
+
+                                            unsigned int X = (x - originX) / resolution;
+                                            unsigned int Y = (y - originY) / resolution;
+
+                                            map->getIndex(X, Y, index);
+                                            frontier_array_centroid.push_back(index);
+                                            type_array.push_back(-1);
+                                        }
+
                         }
+
                         type++;
                     }
+
         publishMarkerArray(frontier_array_centroid, type_array);
         if(frontier_list.size() > 0)
             return frontier_array_centroid[max];
@@ -435,7 +465,7 @@ private:
 		mMarkerPub_.publish(marker.getMarker());
 	}
 
-    void publishMarkerArray(const std::vector<unsigned int> &index_array, std::vector<unsigned int> type) {
+    void publishMarkerArray(const std::vector<unsigned int> &index_array, std::vector<int> type) {
 		visualization_msgs::MarkerArray markersMsg;
         for(int i = 0; i < index_array.size(); i++) {
             double x, y;
@@ -461,6 +491,9 @@ private:
             } else if (type[i] == 3) {
                 Color color(0, 1.0, 0);
                 marker.setParams("frontier", pose.getPose(), 0.35, color.getColor(), i);
+            } else if (type[i] == -1) {
+                Color color(0, 1.0, 0);
+                marker.setParams("frontier", pose.getPose(), 0.15, color.getColor(), i, 0.6);
             } else {
                 ROS_WARN("TYPE INDEX ERROR!");
             }

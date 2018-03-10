@@ -1,5 +1,7 @@
 <launch>
-	<node name="get_map_server" pkg="autonomous_exploration" type="get_map_server" />
+	<node name="get_map_server" pkg="autonomous_exploration" type="get_map_server">
+		<param name="LETHAL_OBSTACLE" type="int" value= "80" />
+	</node>
 
 	<!-- Robot's radius (meters). -->
 	<param name="robot_radius" type="double" value="$(optenv ROS_ROBOT_RADIUS 0.18)" />

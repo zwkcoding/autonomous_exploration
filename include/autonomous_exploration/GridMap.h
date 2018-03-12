@@ -32,6 +32,18 @@ public:
 		yinit_ = 0;
     }
 
+	geometry_msgs::Pose current_pose_local;
+
+    inline double modifyTheta(double theta)
+    {
+        if (theta < 0)
+            return theta + 2 * M_PI;
+        if (theta >= 2 * M_PI)
+            return theta - 2 * M_PI;
+
+        return theta;
+    }
+
 	void generateMap() {
 		boost::posix_time::ptime current_time = Time::now().toBoost();
 		std::string name = boost::posix_time::to_iso_extended_string(current_time);
@@ -105,7 +117,7 @@ public:
         }
         double x = transform.getOrigin().x() - xinit_;
         double y = transform.getOrigin().y() - yinit_;
-        double w = tf::getYaw(transform.getRotation());
+        double w = modifyTheta(tf::getYaw(transform.getRotation()));
 
         unsigned int X = (x - getOriginX()) / getResolution();
         unsigned int Y = (y - getOriginY()) / getResolution();
@@ -115,6 +127,9 @@ public:
             ROS_ERROR("Is the robot out of the map?");
             return false;
         }
+        current_pose_local.position.x = x;
+        current_pose_local.position.y = y;
+        tf::quaternionTFToMsg(transform.getRotation(), current_pose_local.orientation);
 
         ROS_INFO("Robot's coordinates are %d, %d \n", X, Y);
 
@@ -156,6 +171,7 @@ public:
         y = Y*getResolution() + getOriginY();
 		return true;
 	}
+    
 
 	void clearArea(unsigned int center) {
 		unsigned int xCenter;
@@ -233,8 +249,21 @@ public:
 
 	bool isFrontier(unsigned int index)
 	{
-		ROS_DEBUG("Map resolution: %f", getResolution());
-		return uFunction(index) > mGainConst;
+        if(1) {
+            ROS_DEBUG("Map resolution: %f", getResolution());
+            return uFunction(index) > mGainConst;
+        }
+        // todo index circle-limit , bfs/rrt-sampling frontier search
+//        if (getData(index) != NO_INFORMATION || frontier_flag[idx]) {
+//            return false;
+//        }
+//        BOOST_FOREACH(unsigned int nbr, nhood4(idx, size_x_, size_y_)) {
+//                        if (map_data_[nbr] == FREE_SPACE) {
+//                            return true;
+//                        }
+//                    }
+//        return false;
+
 	}
 
 	double uFunction(unsigned int index)
@@ -371,7 +400,7 @@ public:
 	}
 
 	const nav_msgs::OccupancyGrid& getMap() const { return mOccupancyGrid; }
-
+    geometry_msgs::Pose getCurrentLocalPosition() const {return current_pose_local;};
 	unsigned int getWidth() { return mMapWidth; }
 	unsigned int getHeight() { return mMapHeight; }
 	unsigned int getSize() { return mMapWidth * mMapHeight; }

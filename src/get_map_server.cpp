@@ -76,7 +76,7 @@ int main(int argc, char **argv)
 	NodeHandle n;
     ros::NodeHandle private_nh_("~");
     int obstacle_value = 0;
-    private_nh_.param<int>("LETHAL_OBSTACLE", obstacle_value, 50);
+    private_nh_.param<int>("LETHAL_OBSTACLE", obstacle_value, 80);
     g_obstacle = obstacle_value;
 	Subscriber sub = n.subscribe("/global_map", 10, mapUpdate);
 

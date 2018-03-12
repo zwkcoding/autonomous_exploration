@@ -7,8 +7,10 @@
 namespace frontier_exploration {
 
     FrontierSearch::FrontierSearch(const nav_msgs::OccupancyGrid &mapData)
-            : map_(mapData),
-              map_data_(mapData.data) {
+            :search_radius(50),
+             min_search_dis(3),
+             map_(mapData),
+             map_data_(mapData.data) {
         resolution_ = mapData.info.resolution;
         Xstartx_ = mapData.info.origin.position.x;
         Xstarty_ = mapData.info.origin.position.y;
@@ -61,7 +63,7 @@ namespace frontier_exploration {
                                 float dist = pow((pow((extend_x - ref_x), 2) + pow((extend_y - ref_y), 2)), 0.5);
                                 // not to flood too far scope, for fast speed
                                 // todo use local_map size
-                                if (dist < 25) {
+                                if (dist < search_radius) {
                                     bfs.push(nbr);
                                 }
                                 //check if cell is new frontier cell (unvisited, NO_INFORMATION, free neighbour)
@@ -70,7 +72,7 @@ namespace frontier_exploration {
                                 float dist = pow((pow((extend_x - ref_x), 2) + pow((extend_y - ref_y), 2)), 0.5);
                                 frontier_flag[nbr] = true;
                                 // todo use minimal distance
-                                if(dist > 3) {
+                                if(dist > min_search_dis) {
                                     Frontier new_frontier = buildNewFrontier(nbr, pos, frontier_flag);
                                     // todo consider vehicle width pass ability
                                     if(1) {
@@ -141,7 +143,7 @@ namespace frontier_exploration {
                                 double distance = sqrt(pow((double(ref_x) - double(wx)), 2.0) +
                                                        pow((double(ref_y) - double(wy)), 2.0));
                                 // not to consider too far scope, for fast speed
-                                if (distance < 25) {
+                                if (distance < search_radius) {
                                     if (distance < output.min_distance) {
                                         output.min_distance = distance;
                                     }

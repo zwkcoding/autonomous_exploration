@@ -80,6 +80,7 @@ namespace frontier_exploration {
         const std::vector<int8_t> &map_data_;
         unsigned int size_x_, size_y_;
         float resolution_, Xstarty_, Xstartx_;
+        float search_radius, min_search_dis;
     };
 
 }

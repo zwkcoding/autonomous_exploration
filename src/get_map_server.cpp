@@ -11,7 +11,7 @@ using namespace ros;
 nav_msgs::GetMap::Response map_;
 boost::mutex map_mutex;
 bool got_map;
-int g_obstacle;
+int g_obstacle_threshold;
 // todo could make changes on map(ROI, replace value...)here
 void mapUpdate(const nav_msgs::OccupancyGrid::ConstPtr &map)
 {
@@ -39,7 +39,7 @@ void mapUpdate(const nav_msgs::OccupancyGrid::ConstPtr &map)
         mp[map->data[i]]++;
         if(map->data[i] == -1) {
             map_.map.data[i] = map->data[i];
-        } else if(map->data[i] <= g_obstacle) {
+        } else if(map->data[i] <= g_obstacle_threshold) {
             map_.map.data[i] = 0;
         } else {
             map_.map.data[i] = 100;
@@ -77,7 +77,7 @@ int main(int argc, char **argv)
     ros::NodeHandle private_nh_("~");
     int obstacle_value = 0;
     private_nh_.param<int>("LETHAL_OBSTACLE", obstacle_value, 80);
-    g_obstacle = obstacle_value;
+    g_obstacle_threshold = obstacle_value;
 	Subscriber sub = n.subscribe("/global_map", 10, mapUpdate);
 
 	ServiceServer ss = n.advertiseService("current_map", mapCallback);

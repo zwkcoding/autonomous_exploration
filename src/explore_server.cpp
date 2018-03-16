@@ -1,6 +1,8 @@
 #include <ros/ros.h>
 #include <map>
 #include <queue>
+#include <algorithm> // sort
+
 #include <nav_msgs/GetMap.h>
 #include <geometry_msgs/Twist.h>
 #include <message_filters/subscriber.h>
@@ -11,9 +13,10 @@
 #include <actionlib/client/simple_action_client.h>
 #include <actionlib/client/terminal_state.h>
 #include <opt_utils/opt_utils.hpp>
+
 #include "autonomous_exploration/bfs_frontier_search.hpp"
 #include "autonomous_exploration/util.hpp"
-
+#include "autonomous_exploration/Config.hpp"
 #include <autonomous_exploration/ExploreAction.h>
 #include <autonomous_exploration/GridMap.h>
 #include <autonomous_exploration/VisMarker.h>
@@ -26,7 +29,59 @@ using namespace tf;
 using namespace ros;
 using namespace frontier_exploration;
 
-#define DEBUG
+//#define DEBUG
+
+
+/**
+     * Used to store data for each exploration point.
+     * After all expl. points have been processed the overallValue
+     * can be calculated which is used to sort the points.
+     */
+struct ExplorationPoint {
+
+    ExplorationPoint(PoseWrap expl_pose, unsigned int num_expl_cells, double ang_dist, double robot_point_dist) : explPose(expl_pose),
+                                                                   numberOfExploredCells(num_expl_cells),
+                                                                   angularDistance(ang_dist),
+                                                                   robotPointDistance(robot_point_dist),
+                                                                    expl_value(0.0),
+                                                                   ang_value(0.0), dist_value(0.0){
+    }
+
+    bool operator<(const ExplorationPoint &rhs) const {
+        return overallValue < rhs.overallValue;
+    }
+
+    /**
+     * Calculates the overall value of this exploratin point.
+     * If max_explored_cells or max_robot_goal_dist is 0, the explored cells
+     * or the the distance of the goal point is ignored.
+     * The bigger the better.
+     */
+    double calculateOverallValue(config::Weights &weights, double max_explored_cells, double max_robot_goal_dist) {
+        if (max_explored_cells != 0) {
+            expl_value = weights.explCells * (numberOfExploredCells / max_explored_cells);
+        }
+        ang_value = weights.angDist * (1 - (angularDistance / M_PI));
+        if (max_robot_goal_dist != 0) {
+            dist_value = weights.robotGoalDist * (1 - (robotPointDistance / max_robot_goal_dist));
+        }
+        overallValue = expl_value + ang_value + dist_value;
+        return overallValue;
+    }
+
+    double overallValue;
+    PoseWrap explPose;
+    unsigned int numberOfExploredCells;
+    double angularDistance;
+    double robotPointDistance;
+
+    double expl_value;
+    double ang_value;
+    double dist_value;
+
+};
+
+
 
 class ExploreAction {
 
@@ -190,7 +245,7 @@ public:
 
         int count = 0;
         std::vector<unsigned int> frontier_centroids;
-        std::vector<double> frontier_cost;
+        std::vector<PoseWrap> final_goals;
         auto start = hmpl::now();
         while (ok() && as_.isActive()) {
             loop_rate.sleep();
@@ -210,37 +265,9 @@ public:
             }
 
             frontier_centroids = exploreByBfs(&mCurrentMap_, pos_index);
+
             if (frontier_centroids.size() > 0) {
-                ROS_INFO("Got %d frontier_centroids !", frontier_centroids.size());
-                int i = 0;
-                double cost, distance_weight;
-                // calculate angle_diff cost
-                BOOST_FOREACH(unsigned int index, frontier_centroids) {
-
-                                double mxs, mys;
-                                geometry_msgs::Pose start_pose = mCurrentMap_.getCurrentLocalPosition();
-                                mxs = start_pose.position.x;
-                                mys = start_pose.position.y;
-
-                                double gx, gy;
-                                mCurrentMap_.getOdomCoordinates(gx, gy, index);
-
-                                double goal_proj_x = gx-mxs;
-                                double goal_proj_y = gy-mys;
-
-                                double start_angle = util::modifyTheta(tf::getYaw(start_pose.orientation));
-                                double goal_angle = util::modifyTheta(std::atan2(goal_proj_y,goal_proj_x));
-                                double angle_diff = util::calcDiffOfRadian(start_angle, goal_angle);
-                                if(util::calcDistance(start_pose.position.x, start_pose.position.y,
-                                gx, gy) < 3) {
-                                    distance_weight = 2;
-                                } else {
-                                    distance_weight = 1;
-                                }
-                                cost = std::pow(angle_diff,2) * distance_weight;
-                                frontier_cost.push_back(cost);
-                                i++;
-                            }
+                final_goals = getCheapest(frontier_centroids, pos_index);
                 break;
             } else {
                 ROS_INFO("Got NO frontier_centroids!");
@@ -248,9 +275,8 @@ public:
             }
         }
 
-
         auto end = hmpl::now();
-        std::cout << "once explore cost time:" << hmpl::getDurationInSecs(start, end) << "\n";
+        std::cout << " explore cost time:" << hmpl::getDurationInSecs(start, end) << "\n";
 
         if (as_.isActive()) {
             if (frontier_centroids.size() > 0) {
@@ -402,7 +428,7 @@ private:
 //                        type_array.push_back(type + 2);
                         // judge pass ability
                         // todo delete/move frontier centrod that in all unknown area
-                        if (map->isFree(index)) {
+                        /*if (map->isFree(index)) */{
                             frontier_array_centroid.push_back(index);  // insert centroid
                             type_array.push_back(type + 1);
                             // show invaid frontiers
@@ -420,67 +446,12 @@ private:
                                             type_array.push_back(type);
                                         }
 #endif
-                        } else {
-//                            frontier_array_centroid.push_back(index);  // insert centroid
-//                            type_array.push_back(-1);
-#ifdef DEBUG
-                            BOOST_FOREACH(geometry_msgs::Point point, frontier.point_array) {
-                                            float x = point.x;
-                                            float y = point.y;
-                                            unsigned int index;
-
-                                            unsigned int X = (x - originX) / resolution;
-                                            unsigned int Y = (y - originY) / resolution;
-
-                                            map->getIndex(X, Y, index);
-                                            frontier_array_centroid.push_back(index);
-                                            type_array.push_back(-1);
-                                        }
-#endif
-
                         }
-
                         type++;
                     }
-
-        int i = 0;
-        double cost, min_cost, distance_weight;
-        int min_index = 0;
-        min_cost = std::numeric_limits<double>::infinity();
-        // calculate angle_diff cost
-        BOOST_FOREACH(unsigned int index, frontier_array_centroid) {
-
-                        double mxs, mys;
-                        geometry_msgs::Pose start_pose = mCurrentMap_.getCurrentLocalPosition();
-                        mxs = start_pose.position.x;
-                        mys = start_pose.position.y;
-
-                        double gx, gy;
-                        mCurrentMap_.getOdomCoordinates(gx, gy, index);
-
-                        double goal_proj_x = gx-mxs;
-                        double goal_proj_y = gy-mys;
-
-                        double start_angle = util::modifyTheta(tf::getYaw(start_pose.orientation));
-                        double goal_angle = util::modifyTheta(std::atan2(goal_proj_y,goal_proj_x));
-                        double angle_diff = util::calcDiffOfRadian(start_angle, goal_angle);
-                        if(util::calcDistance(start_pose.position.x, start_pose.position.y,
-                                              gx, gy) < 3) {
-                            distance_weight = 2;
-                        } else {
-                            distance_weight = 1;
-                        }
-                        cost = std::pow(angle_diff,2) * distance_weight;
-                        if(cost < min_cost ) {
-                            min_cost = cost;
-                            min_index = i;
-                        }
-                        i++;
-                    }
-        // show the min cost centroid
-        type_array[min_index] = -2;
+#ifdef DEBUG
         publishMarkerArray(frontier_array_centroid, type_array);
-
+#endif
         return frontier_array_centroid;
     }
 
@@ -609,6 +580,125 @@ private:
         mMarkerPub_.publish(markersMsg);
     }
 
+    std::vector<PoseWrap> getCheapest(std::vector<unsigned int> &frontier_centroids, unsigned int current_pos) {
+        std::vector<PoseWrap> goals;
+        goals.reserve(frontier_centroids.size());
+
+        int too_close_counter = 0;
+        int no_new_cell_counter = 0;
+        int touch_obstacle = 0;
+        int outside_of_the_map = 0;
+
+        double max_robot_goal_dist = 0;
+        double max_explored_cells = 0;
+        std::list<ExplorationPoint> expl_point_list;
+        unsigned int map_width = mCurrentMap_.getWidth();
+        unsigned int map_height = mCurrentMap_.getHeight();
+        double origin_x = mCurrentMap_.getOriginX();
+        double origin_y = mCurrentMap_.getOriginY();
+        // calculate angle_diff cost
+        BOOST_FOREACH(unsigned int index, frontier_centroids) {
+                        if(index > map_width * map_height) {
+                            outside_of_the_map++;
+                            ROS_WARN("Goal point is out of map!");
+                            continue;
+                        }
+                        double mxs, mys;
+                        geometry_msgs::Pose start_pose = mCurrentMap_.getCurrentLocalPosition();
+                        mxs = start_pose.position.x;
+                        mys = start_pose.position.y;
+
+                        double gx, gy;
+                        mCurrentMap_.getOdomCoordinates(gx, gy, index);
+
+                        double goal_proj_x = gx-mxs;
+                        double goal_proj_y = gy-mys;
+
+                        double distance2goal = util::calcDistance(start_pose.position.x, start_pose.position.y,
+                                                                  gx, gy);
+                        if(distance2goal > max_robot_goal_dist) {
+                            max_robot_goal_dist = distance2goal;
+                        }
+                        // Goal poses which are too close to the robot are discarded.
+                        if(distance2goal < config_.min_goal_distance) {
+                            too_close_counter++;
+                            continue;
+                        }
+
+                        // Vehicle body collision checking
+                        if(!mCurrentMap_.isFree(index)) {
+                            touch_obstacle++;
+                            continue;
+                        }
+
+                        // Ignore ecploration point if it is no real exploration point.
+                        double numberOfExploredCells = mCurrentMap_.uFunction(index);
+                        if (numberOfExploredCells > max_explored_cells) {
+                            max_explored_cells = numberOfExploredCells;
+                        }
+                        if (numberOfExploredCells <= 5.0) {
+                            no_new_cell_counter++;
+                            continue;
+                        }
+                        // Calculate angular distance, will be [0,PI)
+                        double start_angle = util::modifyTheta(tf::getYaw(start_pose.orientation));
+                        double goal_angle = util::modifyTheta(std::atan2(goal_proj_y,goal_proj_x));
+                        PoseWrap goal_pose(gx, gy, goal_angle);
+                        double angle_distance = util::calcDiffOfRadian(start_angle, goal_angle);
+
+                        // Create exploration point and add it to a list to be sorted as soon
+                        // as max_robot_goal_dist and max_explored_cells are known.
+                        ExplorationPoint expl_point(goal_pose, numberOfExploredCells, angle_distance, distance2goal); // See documentation in ExplorationPoint.edgeFound.
+                        expl_point_list.push_back(expl_point);
+                    }
+        ROS_INFO("%d of %d exploration points are uses: %d touches an obstacle, %d are too close to the robot, %d leads to no new cells, %d lies outside of the map",
+                 expl_point_list.size(), frontier_centroids.size(), touch_obstacle, too_close_counter, no_new_cell_counter,
+                 outside_of_the_map);
+        std::list<ExplorationPoint>::iterator it = expl_point_list.begin();
+        double max_value = 0;
+        double min_value = std::numeric_limits<double>::max();
+        double value = 0;
+        for (; it != expl_point_list.end(); it++) {
+            value = it->calculateOverallValue(config_.weights, max_explored_cells, max_robot_goal_dist);
+            if (value > max_value)
+                max_value = value;
+            if (value < min_value)
+                min_value = value;
+        }
+        // Higher values are better, so the optimal goal is the last one.
+        expl_point_list.sort();
+        PoseWrap expl_rbs;
+        std::vector<unsigned int> goal_list;
+        std::vector<int> type_array;
+        int type = 0;
+        ROS_INFO("Exploration point list:\n");
+        for (auto rit = expl_point_list.crbegin(); rit != expl_point_list.crend(); ++rit) {
+            expl_rbs = rit->explPose;
+            goals.push_back(expl_rbs);
+            ROS_INFO(
+                    "Point(%4.2f, %4.2f, %4.2f) values: overall(%4.2f), expl(%4.2f), ang(%4.2f), dist(%4.2f), driveability(%4.2f), edge(%4.2f)\n",
+                    rit->explPose.x, rit->explPose.y, rit->explPose.theta, rit->overallValue,
+                    rit->expl_value, rit->ang_value, rit->dist_value);
+            unsigned int x = (rit->explPose.x - origin_x) / mCurrentMap_.getResolution();
+            unsigned int y = (rit->explPose.y - origin_y) / mCurrentMap_.getResolution();
+            unsigned int index;
+            mCurrentMap_.getIndex(x, y, index);
+            goal_list.push_back(index);
+            type_array.push_back(type);
+            type++;
+        }
+
+
+        if (!goals.empty()) {
+            type_array[0] = -2;
+            publishMarkerArray(goal_list, type_array);
+        } else {
+            ROS_INFO( "did not find any target, propably stuck in an obstacle.");
+        }
+
+        return goals;
+    }
+
 
 protected:
     NodeHandle nh_;
@@ -627,6 +717,9 @@ protected:
     int goalReached_;
 
     Publisher mMarkerPub_;
+
+public:
+    config::Config config_;
 };
 
 int main(int argc, char **argv) {

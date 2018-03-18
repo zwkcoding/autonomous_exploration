@@ -16,6 +16,8 @@ find_package(catkin REQUIRED COMPONENTS
   nav_msgs
   visualization_msgs
   opt_utils
+  internal_grid_map
+  grid_map_ros
 )
 
 find_package(Boost REQUIRED COMPONENTS system)
@@ -32,6 +34,7 @@ generate_messages(
   geometry_msgs
   nav_msgs
   visualization_msgs
+
 )
 
 catkin_package(

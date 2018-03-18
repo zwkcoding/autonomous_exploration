@@ -8,7 +8,7 @@ namespace frontier_exploration {
 
     FrontierSearch::FrontierSearch(const nav_msgs::OccupancyGrid &mapData)
             :search_radius(50),
-             min_search_dis(3),
+             min_search_dis(5),
              map_(mapData),
              map_data_(mapData.data) {
         resolution_ = mapData.info.resolution;
@@ -105,7 +105,7 @@ namespace frontier_exploration {
         bfs.push(initial_cell);
         float ref_x, ref_y;
         geometry_msgs::Point point;
-        indexToReal(map_, initial_cell, ref_x, ref_x);
+        indexToReal(map_, initial_cell, ref_x, ref_y);
         point.x = ref_x;
         point.y = ref_y;
         output.point_array.push_back(point);
@@ -181,28 +181,30 @@ namespace frontier_exploration {
             return false;
         }
 
-        //check that cell is unknown and not already marked as frontier
-        if (map_data_[idx] != FREE_SPACE || frontier_flag[idx]) {
-            return false;
-        }
+        if(1) {
+            //check that cell is unknown and not already marked as frontier
+            if (map_data_[idx] != FREE_SPACE || frontier_flag[idx]) {
+                return false;
+            }
 
-        // todo
-        //frontier cells should have at least one cell in 4-connected neighbourhood that is free
-        BOOST_FOREACH(unsigned int nbr, nhood8(idx, size_x_, size_y_)) {
-                        if (map_data_[nbr] == NO_INFORMATION ) {
-                            int no_inf_count = 0;
-                            BOOST_FOREACH(unsigned int nbrr, nhood8(nbr, size_x_, size_y_))  {
-                                if(map_data_[nbrr] == NO_INFORMATION) {
-                                    ++no_inf_count;
-                                }
-                                if(no_inf_count > 2) {
-                                    return true;
-                                }
+            // todo
+            //frontier cells should have at least one cell in 4-connected neighbourhood that is free
+            BOOST_FOREACH(unsigned int nbr, nhood8(idx, size_x_, size_y_)) {
+                            if (map_data_[nbr] == NO_INFORMATION) {
+                                int no_inf_count = 0;
+                                BOOST_FOREACH(unsigned int nbrr, nhood8(nbr, size_x_, size_y_)) {
+                                                if (map_data_[nbrr] == NO_INFORMATION) {
+                                                    ++no_inf_count;
+                                                }
+                                                if (no_inf_count > 2) {
+                                                    return true;
+                                                }
+                                            }
                             }
                         }
-                    }
 
-        return false;
+            return false;
+        }
 
     }
 

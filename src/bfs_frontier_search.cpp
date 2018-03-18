@@ -7,7 +7,9 @@
 namespace frontier_exploration {
 
     FrontierSearch::FrontierSearch(const nav_msgs::OccupancyGrid &mapData)
-            :search_radius(50),
+            :polygon_length_(50.0),
+             polygon_width_(50.0),
+             search_radius(50),
              min_search_dis(5),
              map_(mapData),
              map_data_(mapData.data) {
@@ -18,7 +20,46 @@ namespace frontier_exploration {
         size_y_ = mapData.info.height;
     }
 
-    std::list<Frontier> FrontierSearch::searchFrom(unsigned int pos) {
+    void FrontierSearch::addPolygon(double length, double width) {
+        hmpl::Vector2D<double>  first_point, second_point, third_point, fourth_point;
+        first_point.x = length / 2;
+        first_point.y = width / 2;
+
+        second_point.x = first_point.x;
+        second_point.y = -first_point.y;
+
+        third_point.x = -first_point.x;
+        third_point.y = second_point.y;
+
+        fourth_point.x = third_point.x;
+        fourth_point.y = first_point.y;
+
+        interest_polygon_area_.clear();
+        interest_polygon_area_.push_back(first_point);
+        interest_polygon_area_.push_back(second_point);
+        interest_polygon_area_.push_back(third_point);
+        interest_polygon_area_.push_back(fourth_point);
+    }
+
+    void FrontierSearch::updatePolygon(hmpl::Pose2D &current_pos) {
+        double base_theta = current_pos.orientation;
+        // Calculate cos and sin in advance
+        double cos_theta = std::cos(base_theta);
+        double sin_theta = std::sin(base_theta);
+
+        std::vector<hmpl::Vector2D<double> >::iterator p;
+        for (p = interest_polygon_area_.begin(); p < interest_polygon_area_.end(); p++) {
+             p->x = p->x * cos_theta - p->y * sin_theta + current_pos.position.x;
+             p->y = p->x * sin_theta + p->y * cos_theta + current_pos.position.y;
+        }
+
+    }
+
+
+    std::list<Frontier> FrontierSearch::searchFrom(unsigned int pos, hmpl::Pose2D &current_pos) {
+
+        addPolygon(polygon_width_, polygon_length_);
+        updatePolygon(current_pos);
 
         std::list<Frontier> frontier_list;
 
@@ -63,8 +104,16 @@ namespace frontier_exploration {
                                 float dist = pow((pow((extend_x - ref_x), 2) + pow((extend_y - ref_y), 2)), 0.5);
                                 // not to flood too far scope, for fast speed
                                 // todo use local_map size
-                                if (dist < search_radius) {
-                                    bfs.push(nbr);
+                                {
+                                 hmpl::Vector2D<double> point(extend_x, extend_y);
+                                    if(util::pointInPolygon(point, interest_polygon_area_)) {
+                                        bfs.push(nbr);
+                                    }
+                                }
+                                if(0) {
+                                    if (dist < search_radius) {
+                                        bfs.push(nbr);
+                                    }
                                 }
                                 //check if cell is new frontier cell (unvisited, NO_INFORMATION, free neighbour)
                             } else if (isNewFrontierCell(nbr, frontier_flag)) {
@@ -76,7 +125,7 @@ namespace frontier_exploration {
                                     Frontier new_frontier = buildNewFrontier(nbr, pos, frontier_flag);
                                     // todo consider vehicle width pass ability
                                     if(1) {
-                                        if (new_frontier.size > 30) {
+                                        if (new_frontier.size > 15) {
                                             frontier_list.push_back(new_frontier);
                                         }
                                     }
@@ -143,7 +192,8 @@ namespace frontier_exploration {
                                 double distance = sqrt(pow((double(ref_x) - double(wx)), 2.0) +
                                                        pow((double(ref_y) - double(wy)), 2.0));
                                 // not to consider too far scope, for fast speed
-                                if (distance < search_radius) {
+                                hmpl::Vector2D<double> point(wx, wy);
+                                if (util::pointInPolygon(point, interest_polygon_area_)/*distance < search_radius*/) {
                                     if (distance < output.min_distance) {
                                         output.min_distance = distance;
                                     }

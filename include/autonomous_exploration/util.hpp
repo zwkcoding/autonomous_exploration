@@ -5,6 +5,8 @@
 #ifndef AUTONOMOUS_EXPLORATION_UTIL_HPP
 #define AUTONOMOUS_EXPLORATION_UTIL_HPP
 
+#include <opt_utils/opt_utils.hpp>
+
 namespace util {
     inline double calcDistance(double x1, double y1, double x2, double y2)
     {
@@ -29,6 +31,24 @@ namespace util {
             return diff;
         else
             return 2 * M_PI - diff;
+    }
+
+    // http://alienryderflex.com/polygon/
+    inline bool pointInPolygon(hmpl::Vector2D<double> &point, std::vector<hmpl::Vector2D<double> > &polygon) {
+        int j = polygon.size() - 1;
+        bool oddNodes = false;
+
+        for (unsigned int i = 0; i < polygon.size(); i++) {
+            if ((polygon[i].y < point.y && polygon[j].y >= point.y) ||
+                (polygon[j].y < point.y && polygon[i].y >= point.y)) {
+                if (polygon[i].x +
+                    (point.y - polygon[i].y) / (polygon[j].y - polygon[i].y) * (polygon[j].x - polygon[i].x) < point.x) {
+                    oddNodes = !oddNodes;
+                }
+            }
+            j = i;
+        }
+        return oddNodes;
     }
 }
 

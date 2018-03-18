@@ -492,7 +492,13 @@ private:
 //        map->clearArea(start);
 //        ROS_INFO("Cleared the area");
         FrontierSearch bfs_searcher(map->getMap());
-        std::list<Frontier> frontier_list = bfs_searcher.searchFrom(start);
+
+        hmpl::Pose2D current_pos;
+        geometry_msgs::Pose start_pose = mCurrentMap_.getCurrentLocalPosition();
+        current_pos.position.x = start_pose.position.x;
+        current_pos.position.y = start_pose.position.y;
+        current_pos.orientation = util::modifyTheta(tf::getYaw(start_pose.orientation));
+        std::list<Frontier> frontier_list = bfs_searcher.searchFrom(start, current_pos);
         ROS_INFO("frontier_list size: %d", frontier_list.size());
 
         //create placeholder for selected frontier
@@ -600,8 +606,8 @@ private:
         }
 
         mCurrentMap_.update(srv.response.map);
-        ROS_INFO("Got new map of size %d x %d", mCurrentMap_.getWidth(), mCurrentMap_.getHeight());
-        ROS_INFO("Map resolution is: %f", mCurrentMap_.getResolution());
+//        ROS_INFO("Got new map of size %d x %d", mCurrentMap_.getWidth(), mCurrentMap_.getHeight());
+//        ROS_INFO("Map resolution is: %f", mCurrentMap_.getResolution());
 
         return true;
     }
@@ -619,9 +625,9 @@ private:
         }
 
         binary_ogm_ = srv.response.map;
-        unsigned int  mMapWidth = binary_ogm_.info.width;
-        unsigned int mMapHeight = binary_ogm_.info.height;
-        ROS_INFO("Got new binary map of size %d x %d", mMapWidth, mMapHeight);
+//        unsigned int  mMapWidth = binary_ogm_.info.width;
+//        unsigned int mMapHeight = binary_ogm_.info.height;
+//        ROS_INFO("Got new binary map of size %d x %d", mMapWidth, mMapHeight);
 
         return true;
     }

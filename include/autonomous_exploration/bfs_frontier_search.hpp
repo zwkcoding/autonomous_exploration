@@ -14,11 +14,14 @@
 #include <boost/foreach.hpp>
 #include "visualization_msgs/Marker.h"
 #include "autonomous_exploration/GridMap.h"
+#include "autonomous_exploration/util.hpp"
 
 namespace frontier_exploration {
 /**
  * @brief Thread-safe implementation of a frontier-search task for an input costmap.
  */
+
+
     struct Frontier {
     public:
         int size;
@@ -52,7 +55,11 @@ namespace frontier_exploration {
          * @param position Initial position to search from
          * @return List of frontiers, if any
          */
-        std::list<Frontier> searchFrom(unsigned int pos);
+        std::list<Frontier> searchFrom(unsigned int pos, hmpl::Pose2D &current_pos);
+
+        void setPolygonWidth(double r) { polygon_width_ = r; }
+
+        void setPolygonLength(double r) { polygon_length_ = r; }
 
 
     protected:
@@ -74,6 +81,10 @@ namespace frontier_exploration {
          */
         bool isNewFrontierCell(unsigned int idx, const std::vector<bool> &frontier_flag);
 
+        void addPolygon(double length, double width);
+
+        void updatePolygon(hmpl::Pose2D &current_pos);
+
     private:
 
         const nav_msgs::OccupancyGrid &map_;
@@ -81,6 +92,10 @@ namespace frontier_exploration {
         unsigned int size_x_, size_y_;
         float resolution_, Xstarty_, Xstartx_;
         float search_radius, min_search_dis;
+
+        std::vector<hmpl::Vector2D<double> >  interest_polygon_area_;
+        double polygon_length_;
+        double polygon_width_;
     };
 
 }

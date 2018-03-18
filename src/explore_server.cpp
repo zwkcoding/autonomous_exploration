@@ -4,6 +4,7 @@
 #include <algorithm> // sort
 
 #include <nav_msgs/GetMap.h>
+#include <nav_msgs/Path.h>
 #include <geometry_msgs/Twist.h>
 #include <message_filters/subscriber.h>
 #include <std_msgs/ColorRGBA.h>
@@ -14,6 +15,9 @@
 #include <actionlib/client/terminal_state.h>
 #include <opt_utils/opt_utils.hpp>
 #include <internal_grid_map/internal_grid_map.hpp>
+#include <geometry_msgs/PoseWithCovarianceStamped.h>
+#include <path_transform/path_planning.hpp>
+
 
 #include "autonomous_exploration/bfs_frontier_search.hpp"
 #include "autonomous_exploration/util.hpp"
@@ -96,7 +100,8 @@ public:
         mGetMapClient_ = nh_.serviceClient<nav_msgs::GetMap>(std::string("current_map"));
         mGetBinaryMapClient_ = nh_.serviceClient<nav_msgs::GetMap>(std::string("binary_map"));
 
-
+        start_sub_ = nh_.subscribe("/initialpose", 1, &ExploreAction::startCb, this);
+        path_publisher_ = nh_.advertise<nav_msgs::Path>("PT_path", 1, true);
         double laser_range = 8.0;
 //		nh_.param("laser_max_range", laser_range, 8.);
         mCurrentMap_.setLaserRange(laser_range);
@@ -121,6 +126,8 @@ public:
 //		nh_.param("min_distance", minDistance_, 5.);
         nh_.param("min_gain_threshold", minGain_, 0.5);
         nh_.param("gain_change", gainChangeFactor_, 1.5);
+
+        start_point_ = hmpl::Pose2D(10, 10, M_PI);
 
         // keep initial pose
         double xinit_ = 0, yinit_ = 0;
@@ -309,14 +316,6 @@ public:
             // find gridmap index
             std::vector<grid_map::Index> goals;
             grid_map::Index goal_index;
-
-//            //test
-//            grid_map::Position pose(0, 0);
-//            igm_.maps.getIndex(pose, goal_index);
-//            ROS_INFO("pose(0,0) --> index(%d, %d)", goal_index[0], goal_index[1]);
-//            goals.push_back(goal_index);
-
-
             BOOST_FOREACH(geometry_msgs::Point point, frontier_array) {
                             grid_map::Position pose(point.x, point.y);
                             bool flag1 = igm_.maps.getIndex(pose, goal_index);
@@ -332,7 +331,34 @@ public:
             igm_.updateExplorationTransform(goals, 5, 10, 1.0);
             end = hmpl::now();
             igm_.vis_->publishVisOnDemand(igm_.maps, igm_.explore_transform);
-            ROS_INFO( "PT update cost time %f \n" , hmpl::getDurationInSecs(start, end));
+            ROS_INFO( "PT map cost time %f \n" , hmpl::getDurationInSecs(start, end));
+
+            start = hmpl::now();
+            hmpl::Pose2D revised_start_pose;
+            bool flag = grid_map_path_planning::adjustStartPoseIfOccupied(igm_.maps, start_point_, revised_start_pose,
+                                                                          igm_.obs, igm_.dis, igm_.explore_transform);
+            if(!flag) {
+                std::cout << "start point is out of map" << '\n';
+                continue;
+            }
+
+            std::vector<geometry_msgs::PoseStamped> result_path;
+            grid_map_path_planning::findPathExplorationTransform(igm_.maps, revised_start_pose,
+                                                                 result_path,igm_.obs, igm_.dis, igm_.explore_transform);
+            end = hmpl::now();
+            std::cout << "PT path cost time:" << hmpl::getDurationInSecs(start, end) << "\n";
+            if(!result_path.empty()) {
+                nav_msgs::Path path_msg;
+                geometry_msgs::PoseStamped pose;
+                for (auto &point_itr : result_path) {
+                    pose = point_itr;
+                    path_msg.header.frame_id = igm_.maps.getFrameId();
+                    path_msg.header.stamp = ros::Time::now();
+                    pose.header = path_msg.header;
+                    path_msg.poses.push_back(pose);
+                }
+                path_publisher_.publish(path_msg);
+            }
 
 
             if (frontier_array.size() > 0) {
@@ -379,7 +405,15 @@ public:
         }
     }
 
+    void startCb(const geometry_msgs::PoseWithCovarianceStampedConstPtr &start) {
+        start_point_.position.x = start->pose.pose.position.x;
+        start_point_.position.y = start->pose.pose.position.y;
+        start_point_.orientation = tf::getYaw(start->pose.pose.orientation);
+        std::cout << "get initial state." << std::endl;
+    }
+
 private:
+
     int exploreByInfoGain(GridMap *map, unsigned int start) {
         ROS_INFO("Starting exploration");
 
@@ -791,9 +825,14 @@ protected:
 
     Publisher mMarkerPub_;
     Publisher binary_gom_pub_;
+    Publisher path_publisher_;
+    Subscriber start_sub_;
     hmpl::InternalGridMap igm_;
     ServiceClient mGetBinaryMapClient_;
     nav_msgs::OccupancyGrid binary_ogm_;
+
+    hmpl::Pose2D start_point_;
+
 
 
 

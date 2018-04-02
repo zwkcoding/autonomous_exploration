@@ -17,7 +17,7 @@
 #include <internal_grid_map/internal_grid_map.hpp>
 #include <geometry_msgs/PoseWithCovarianceStamped.h>
 #include <path_transform/path_planning.hpp>
-
+#include <car_model/car_geometry.hpp>
 
 #include "autonomous_exploration/bfs_frontier_search.hpp"
 #include "autonomous_exploration/util.hpp"
@@ -94,8 +94,11 @@ public:
 
     ExploreAction(std::string name, config::Config cfg) : as_(nh_, name, boost::bind(&ExploreAction::run, this, _1), false),
                                       ac_("move_base", true), config_(cfg){
+        ros::NodeHandlePtr pnode_ = ros::NodeHandlePtr(new ros::NodeHandle("~"));
+
 //		mMarkerPub_ = nh_.advertise<visualization_msgs::Marker>("vis_marker", 2);
-        mMarkerPub_ = nh_.advertise<visualization_msgs::MarkerArray>("vis_marker", 2);
+        original_frontier_pub_ = nh_.advertise<visualization_msgs::MarkerArray>("origin_frontier_marker", 1);
+        filtered_frontier_pub_ = nh_.advertise<visualization_msgs::MarkerArray>("filtered_frontier_marker", 1);
         binary_gom_pub_ = nh_.advertise<nav_msgs::OccupancyGrid>("binary_ogm", 2);
         mGetMapClient_ = nh_.serviceClient<nav_msgs::GetMap>(std::string("current_map"));
         mGetBinaryMapClient_ = nh_.serviceClient<nav_msgs::GetMap>(std::string("binary_map"));
@@ -103,33 +106,36 @@ public:
         start_sub_ = nh_.subscribe("/initialpose", 1, &ExploreAction::startCb, this);
         path_publisher_ = nh_.advertise<nav_msgs::Path>("PT_path", 1, true);
         double laser_range = 8.0;
-//		nh_.param("laser_max_range", laser_range, 8.);
+//		pnode_->param("laser_max_range", laser_range, 8.);
         mCurrentMap_.setLaserRange(laser_range);
 
         int lethal_cost;
-        nh_.param("lethal_cost", lethal_cost, 70);
+        pnode_->param("lethal_cost", lethal_cost, 70);
         mCurrentMap_.setLethalCost(lethal_cost);
 
-        nh_.param("gain_threshold", initial_gain_, 20.);
+        pnode_->param("gain_threshold", initial_gain_, 20.);
         mCurrentMap_.setGainConst(initial_gain_);
 
         double robot_radius = config_.vehicle_length / 2;
-//		nh_.param("robot_radius", robot_radius, 2.);
+//		pnode_->param("robot_radius", robot_radius, 2.);
         mCurrentMap_.setRobotRadius(robot_radius);
 
         std::string map_path;
         std::string temp = "/";
-        nh_.param("map_path", map_path, temp);
+        pnode_->param("map_path", map_path, temp);
         mCurrentMap_.setPath(map_path);
 
         minDistance_ = 5.0;
-//		nh_.param("min_distance", minDistance_, 5.);
-        nh_.param("min_gain_threshold", minGain_, 0.5);
-        nh_.param("gain_change", gainChangeFactor_, 1.5);
+//		pnode_->param("min_distance", minDistance_, 5.);
+        pnode_->param("min_gain_threshold", minGain_, 0.5);
+        pnode_->param("gain_change", gainChangeFactor_, 1.5);
 
         start_point_ = hmpl::Pose2D(10, 10, M_PI);
 
         // keep initial pose
+        std::string local_map_frame_name_, global_map_frame_name_;
+        pnode_->param<std::string>("local_map_frame_name", local_map_frame_name_, "base_link");
+        pnode_->param<std::string>("global_map_frame_name", global_map_frame_name_, "/odom");
         double xinit_ = 0, yinit_ = 0;
         tf::TransformListener mTfListener;
         tf::StampedTransform transform;
@@ -139,7 +145,7 @@ public:
         while (temp0 == 0) {
             try {
                 temp0 = 1;
-                mTfListener.lookupTransform(world_frame_id_, std::string("/base_link"), ros::Time(0), transform);
+                mTfListener.lookupTransform(global_map_frame_name_, local_map_frame_name_, ros::Time(0), transform);
             } catch (tf::TransformException ex) {
                 temp0 = 0;
                 ros::Duration(0.1).sleep();
@@ -153,6 +159,9 @@ public:
         mCurrentMap_.setInitPisition(xinit_, yinit_);
 
         igm_.vis_.reset(new hmpl::ExplorationTransformVis("PT_map"));
+
+        // initial car geometry parameters
+        InitCarGeometry(car_);
 
         as_.registerPreemptCallback(boost::bind(&ExploreAction::preemptCB, this));
 
@@ -257,6 +266,8 @@ public:
 
         int count = 0;
         std::vector<geometry_msgs::Point> frontier_array;
+        std::vector<geometry_msgs::Point> filtered_frontier_array;
+
         std::vector<PoseWrap> final_goals;
         auto start = hmpl::now();
         while (ok() && as_.isActive()) {
@@ -302,16 +313,61 @@ public:
                 }
             }
 
-            ROS_INFO("Created map with size %f x %f m (%i x %i cells).",
-                     igm_.maps.getLength().x(), igm_.maps.getLength().y(),
-                     igm_.maps.getSize()(0), igm_.maps.getSize()(1));
-            auto start = hmpl::now();
+//            ROS_INFO("Created map with size %f x %f m (%i x %i cells).",
+//                     igm_.maps.getLength().x(), igm_.maps.getLength().y(),
+//                     igm_.maps.getSize()(0), igm_.maps.getSize()(1));
             igm_.updateDistanceLayerCV();
-            auto end = hmpl::now();
-            std::cout << "fast DT update time [s]:" << hmpl::getDurationInSecs(start, end) << std::endl;
 
-            // find frontier points
+            // find frontier points(no filter)
             frontier_array = exploreByBfs(&mCurrentMap_, pos_index);
+            ROS_INFO("origin frontier size : %d", frontier_array.size());
+            // filter frontier points(collision, infomation_gain)
+            float originX = mCurrentMap_.getOriginX();
+            float originY = mCurrentMap_.getOriginY();
+            float resolution = mCurrentMap_.getResolution();
+            BOOST_FOREACH(geometry_msgs::Point point, frontier_array) {
+                             // Define the robot as square
+                            // todo
+                            grid_map::Position pos(point.x, point.y);
+
+                            float x = point.x;
+                            float y = point.y;
+                            unsigned int index;
+
+                            unsigned int X = (x - originX) / resolution;
+                            unsigned int Y = (y - originY) / resolution;
+
+                            if (this->igm_.maps.isInside(pos)) {
+                                double clearance = this->igm_.getObstacleDistance(pos);
+                                if (clearance < config_.vehicle_length / 2) {
+                                    // the big circle is not collision-free, then do an exact
+                                    // collision checking
+                                } else { // collision-free
+                                    if( mCurrentMap_.getIndex(X, Y, index) ) {
+//                                        auto start = hmpl::now();
+
+//                                        double info_gain = mCurrentMap_.uFunction(index);
+//                                        auto end = hmpl::now();
+//                                        ROS_INFO( "info_gain cost time %f[s] \n" , hmpl::getDurationInSecs(start, end));
+//                                        if(info_gain > 30) {
+                                            filtered_frontier_array.push_back(point);
+//                                        }
+                                    }
+                                }
+                            } else {  // beyond the map boundary
+                            }
+                        }
+#ifdef DEBUG
+            if(filtered_frontier_pub_.getNumSubscribers() > 0) {
+                publishMarkerArray(filtered_frontier_pub_, filtered_frontier_array);
+            }
+#endif
+            ROS_INFO("filtered frontier size : %d", filtered_frontier_array.size());
+
+            break;
+
+
+            // sparse frontier points
 
             // find gridmap index
             std::vector<grid_map::Index> goals;
@@ -327,9 +383,9 @@ public:
                         }
             ROS_INFO("goals of PT nums : %d \n", goals.size());
 
-            start = hmpl::now();
+            auto start = hmpl::now();
             igm_.updateExplorationTransform(goals, 5, 10, 1.0);
-            end = hmpl::now();
+            auto end = hmpl::now();
             igm_.vis_->publishVisOnDemand(igm_.maps, igm_.explore_transform);
             ROS_INFO( "PT map cost time %f \n" , hmpl::getDurationInSecs(start, end));
 
@@ -414,6 +470,57 @@ public:
 
 private:
 
+
+    void InitCarGeometry(hmpl::CarGeometry &car) {
+        car.setBase2Back(config_.base2back);
+        car.setVehicleLength(config_.vehicle_length);
+        car.setVehicleWidth(config_.vehicle_width);
+        car.setWheebase(config_.vehicle_wheelbase);
+        car.buildCirclesFromFootprint();
+    }
+
+    bool isSingleStateCollisionFree(const hmpl::State &current) {
+        // get the footprint circles based on current vehicle state in global frame
+        std::vector<hmpl::Circle> footprint = this->car_.getCurrentCenters(current);
+        // footprint checking
+        for (auto &circle_itr : footprint) {
+            grid_map::Position pos(circle_itr.position.x, circle_itr.position.y);
+            // complete collision checking
+            if (this->igm_.maps.isInside(pos)) {
+                double clearance = this->igm_.getObstacleDistance(pos);
+                if (clearance < circle_itr.r) {  // collision
+                    // less than circle radius, collision
+                    return false;
+                }
+            } else {
+                // beyond boundaries , collision
+                return false;
+            }
+        }
+        // all checked, current state is collision-free
+        return true;
+    }
+
+    bool isSingleStateCollisionFreeImproved(const hmpl::State &current) {
+        // current state is in ogm: origin(0,0) is on center
+        // get the bounding circle position in global frame
+        hmpl::Circle bounding_circle = this->car_.getBoundingCircle(current);
+
+        grid_map::Position pos(bounding_circle.position.x, bounding_circle.position.y);
+        if (this->igm_.maps.isInside(pos)) {
+            double clearance = this->igm_.getObstacleDistance(pos);
+            if (clearance < bounding_circle.r) {
+                // the big circle is not collision-free, then do an exact
+                // collision checking
+                return (this->isSingleStateCollisionFree(current));
+            } else { // collision-free
+                return true;
+            }
+        } else {  // beyond the map boundary
+            return false;
+        }
+    }
+
     int exploreByInfoGain(GridMap *map, unsigned int start) {
         ROS_INFO("Starting exploration");
 
@@ -491,14 +598,19 @@ private:
 
 //        map->clearArea(start);
 //        ROS_INFO("Cleared the area");
-        FrontierSearch bfs_searcher(map->getMap());
+        bfs_searcher_.getMap(map->getMap());
 
         hmpl::Pose2D current_pos;
         geometry_msgs::Pose start_pose = mCurrentMap_.getCurrentLocalPosition();
         current_pos.position.x = start_pose.position.x;
         current_pos.position.y = start_pose.position.y;
         current_pos.orientation = util::modifyTheta(tf::getYaw(start_pose.orientation));
-        std::list<Frontier> frontier_list = bfs_searcher.searchFrom(start, current_pos);
+
+        ROS_INFO_THROTTLE(5, "vehicle position in odom frame (%f[m], %f[m], %f[degree])",
+                          current_pos.position.x, current_pos.position.y,
+                          current_pos.orientation * 180 / M_PI);
+
+        std::list<Frontier> frontier_list = bfs_searcher_.searchFrom(start, current_pos);
         ROS_INFO("frontier_list size: %d", frontier_list.size());
 
         //create placeholder for selected frontier
@@ -545,7 +657,9 @@ private:
                         type++;
                     }
 #ifdef DEBUG
-        publishMarkerArray(frontier_array_centroid, type_array);
+        if(original_frontier_pub_.getNumSubscribers() > 0) {
+            publishMarkerArray(original_frontier_pub_, frontier_array_centroid, type_array);
+        }
 #endif
         return frontier_array;
     }
@@ -636,6 +750,7 @@ private:
         double x, y;
         mCurrentMap_.getOdomCoordinates(x, y, index);
         PoseWrap pose(x, y);
+        std::string frame = mCurrentMap_.getMap().header.frame_id;
 
         VisMarker marker;
         /*
@@ -645,22 +760,26 @@ private:
         */
         if (type == 1) {
             Color color(0, 0, 0.7);
-            marker.setParams("free", pose.getPose(), 0.35, color.getColor());
+            marker.setParams(true, frame, "free", pose.getPose(), 0.35, color.getColor());
         } else if (type == 2) {
             Color color(0, 0.7, 0);
-            marker.setParams("frontier", pose.getPose(), 0.75, color.getColor());
+            marker.setParams(true, frame, "frontier", pose.getPose(), 0.75, color.getColor());
         }
 
-        mMarkerPub_.publish(marker.getMarker());
+        original_frontier_pub_.publish(marker.getMarker());
     }
 
-    void publishMarkerArray(const std::vector<unsigned int> &index_array, std::vector<int> type) {
+    void publishMarkerArray(const ros::Publisher &pub,
+                            const std::vector<unsigned int> &index_array, std::vector<int> type) {
+        static int last_point_nums = 0;
         visualization_msgs::MarkerArray markersMsg;
+
         for (int i = 0; i < index_array.size(); i++) {
             double x, y;
             mCurrentMap_.getOdomCoordinates(x, y, index_array[i]);
             PoseWrap pose(x, y);
 
+            std::string frame = mCurrentMap_.getMap().header.frame_id;
             VisMarker marker;
             /*
               type:
@@ -670,29 +789,103 @@ private:
             type[i] = type[i] % 4;
             if (type[i] == 0) {
                 Color color(0, 0, 0.7);
-                marker.setParams("frontier", pose.getPose(), 0.35, color.getColor(), i);
+                marker.setParams(true, frame, "frontier", pose.getPose(), 0.35, color.getColor(), i);
             } else if (type[i] == 1) {
                 Color color(0, 0.7, 0);
-                marker.setParams("frontier", pose.getPose(), 0.35, color.getColor(), i);
+                marker.setParams(true, frame, "frontier", pose.getPose(), 0.35, color.getColor(), i);
             } else if (type[i] == 2) {
                 Color color(0.7, 0, 0);
-                marker.setParams("frontier", pose.getPose(), 0.35, color.getColor(), i);
+                marker.setParams(true, frame, "frontier", pose.getPose(), 0.35, color.getColor(), i);
             } else if (type[i] == 3) {
                 Color color(0, 1.0, 0);
-                marker.setParams("frontier", pose.getPose(), 0.35, color.getColor(), i);
+                marker.setParams(true, frame, "frontier", pose.getPose(), 0.35, color.getColor(), i);
             } else if (type[i] == -1) {
                 Color color(0, 1.0, 0);
-                marker.setParams("frontier", pose.getPose(), 0.15, color.getColor(), i, 0.6);
+                marker.setParams(true, frame, "frontier", pose.getPose(), 0.15, color.getColor(), i, 0.6);
             } else if (type[i] == -2) {
                 Color color(0, 1.0, 0);
-                marker.setParams("frontier", pose.getPose(), 0.75, color.getColor(), i);
+                marker.setParams(true, frame, "frontier", pose.getPose(), 0.75, color.getColor(), i);
             } else {
                 ROS_WARN("TYPE INDEX ERROR!");
             }
 
             markersMsg.markers.push_back(marker.getMarker());
         }
-        mMarkerPub_.publish(markersMsg);
+
+        // delete old markers
+        if(last_point_nums > index_array.size()) {
+            for (int i = index_array.size(); i < last_point_nums; i++) {
+                visualization_msgs::Marker marker;
+                marker.ns = "frontier";
+                marker.id = i;
+                marker.action = visualization_msgs::Marker::DELETE;
+                markersMsg.markers.push_back(marker);
+            }
+        }
+
+
+        pub.publish(markersMsg);
+        last_point_nums = index_array.size();
+
+    }
+
+    void publishMarkerArray(const ros::Publisher &pub,
+                            const std::vector<geometry_msgs::Point> &points) {
+        static int last_point_nums = 0;
+        visualization_msgs::MarkerArray markersMsg;
+        std::string frame = mCurrentMap_.getMap().header.frame_id;
+
+        for (int i = 0; i < points.size(); i++) {
+            PoseWrap pose(points[i].x, points[i].y);
+            VisMarker marker;
+            /*
+              type:
+                1: free area
+                2: frontier
+            */
+            Color color(0, 0, 0.7);
+            marker.setParams(true, frame, "filtered_frontier", pose.getPose(), 0.7, color.getColor(), i);
+
+            markersMsg.markers.push_back(marker.getMarker());
+        }
+        // delete old markers
+        if(last_point_nums > points.size()) {
+            for (int i = points.size(); i < last_point_nums; i++) {
+                visualization_msgs::Marker marker;
+                marker.ns = "filtered_frontier";
+                marker.id = i;
+                marker.action = visualization_msgs::Marker::DELETE;
+                markersMsg.markers.push_back(marker);
+            }
+        }
+
+        pub.publish(markersMsg);
+
+        last_point_nums = points.size();
+    }
+
+
+    void publishMarkerArray(const ros::Publisher &pub,
+                            const std::vector<unsigned int> &index_array) {
+        visualization_msgs::MarkerArray markersMsg;
+        for (int i = 0; i < index_array.size(); i++) {
+            double x, y;
+            mCurrentMap_.getOdomCoordinates(x, y, index_array[i]);
+            PoseWrap pose(x, y);
+
+            std::string frame = mCurrentMap_.getMap().header.frame_id;
+            VisMarker marker;
+            /*
+              type:
+                1: free area
+                2: frontier
+            */
+            Color color(0, 0, 0.7);
+            marker.setParams(true, frame, "frontier", pose.getPose(), 0.35, color.getColor());
+
+            markersMsg.markers.push_back(marker.getMarker());
+        }
+        pub.publish(markersMsg);
     }
 
     std::vector<PoseWrap> getCheapest(std::vector<unsigned int> &frontier_centroids, unsigned int current_pos) {
@@ -805,7 +998,7 @@ private:
 
         if (!goals.empty()) {
             type_array[0] = -2;
-            publishMarkerArray(goal_list, type_array);
+//            publishMarkerArray(goal_list, type_array);
         } else {
             ROS_INFO( "did not find any target, propably stuck in an obstacle.");
         }
@@ -829,7 +1022,9 @@ protected:
     double gainChangeFactor_;
     int goalReached_;
 
-    Publisher mMarkerPub_;
+    Publisher original_frontier_pub_;
+    Publisher filtered_frontier_pub_;
+
     Publisher binary_gom_pub_;
     Publisher path_publisher_;
     Subscriber start_sub_;
@@ -839,8 +1034,10 @@ protected:
 
     hmpl::Pose2D start_point_;
 
+    // car model
+    hmpl::CarGeometry car_;
 
-
+    FrontierSearch bfs_searcher_;
 
 public:
     config::Config config_;
@@ -853,9 +1050,9 @@ int main(int argc, char **argv) {
     cfg.min_goal_distance = 3.0;
     cfg.weights = config::Weights(1, 1, 1);
     cfg.vehicle_length = 4.9;
-    cfg.vehicle_width = 2.8;
+    cfg.vehicle_width = 1.95;
     cfg.base2back = 1.09;
-
+    cfg.vehicle_wheelbase = 2.86;
     ExploreAction explore("explore", cfg);
 
     spin();

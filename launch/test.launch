@@ -1,7 +1,14 @@
 <launch>
 	<node name="get_map_server" pkg="autonomous_exploration" type="get_map_server">
 		<param name="LETHAL_OBSTACLE" type="int" value= "80" />
+		<param name="map_topic_name"  value="/cover_map"/>
+
 	</node>
+
+	<node name="explore_client" pkg="autonomous_exploration" type="explore_client" output="screen" />
+
+
+    <node name="explore_server" pkg="autonomous_exploration" type="explore_server" output="screen" />
 
 <!--
 	<param name="robot_radius" type="double" value="$(optenv ROS_ROBOT_RADIUS 0.18)" />
@@ -21,6 +28,5 @@
 
 	<param name="map_path" type="string" value="$(env HOME)/maps/"/>
 -->
-	<node name="explore_client" pkg="autonomous_exploration" type="explore_client" output="screen" />
-	<!-- <node name="explore_server" pkg="autonomous_exploration" type="explore_server" output="screen" /> -->
+
 </launch>

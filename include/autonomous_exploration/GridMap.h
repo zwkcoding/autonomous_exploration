@@ -27,9 +27,11 @@ class GridMap
 public:
     // constructor for initialization
     GridMap() {
-		world_frame_id_ = "/odom";
 		xinit_ = 0;
 		yinit_ = 0;
+		ros::NodeHandlePtr pnode_ = ros::NodeHandlePtr(new ros::NodeHandle("~"));
+		pnode_->param<std::string>("local_map_frame_name", local_map_frame_name_, "base_link");
+		pnode_->param<std::string>("global_map_frame_name", global_map_frame_name_, "/odom");
     }
 
 	geometry_msgs::Pose current_pose_local;
@@ -102,13 +104,12 @@ public:
 
 	bool getCurrentPosition(unsigned int &index) 
 	{
-        tf::TransformListener mTfListener;
         tf::StampedTransform transform;
         int temp = 0;
         while (temp == 0) {
 			try {
                 temp = 1;
-                mTfListener.lookupTransform(world_frame_id_, std::string("/base_link"), ros::Time(0), transform);
+				mTfListener_.lookupTransform(global_map_frame_name_, local_map_frame_name_, ros::Time(0), transform);
             } catch (tf::TransformException ex) {
                 temp = 0;
                 ros::Duration(0.1).sleep();
@@ -130,6 +131,9 @@ public:
         current_pose_local.position.x = x;
         current_pose_local.position.y = y;
         tf::quaternionTFToMsg(transform.getRotation(), current_pose_local.orientation);
+//        ROS_INFO_THROTTLE(1, "-------vehicle position in odom frame (%f[m], %f[m], %f[degree])",
+//                          current_pose_local.position.x, current_pose_local.position.y,
+//                          tf::getYaw(current_pose_local.orientation) * 180 / M_PI);
 
         ROS_INFO("Robot's coordinates are %d, %d \n", X, Y);
 
@@ -437,8 +441,9 @@ private:
 	std::string mPath;
 
 	// reserve initial position
-	std::string world_frame_id_ ;
-    double xinit_;
+	tf::TransformListener mTfListener_;
+	std::string local_map_frame_name_, global_map_frame_name_;
+	double xinit_;
     double yinit_;
 };
 

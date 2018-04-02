@@ -13,9 +13,9 @@ class VisMarker
 {
 public:
 	VisMarker() {
-		marker.header.frame_id = "/local_map/local_map";
+//		marker.header.frame_id = "/local_map/local_map";
         marker.header.stamp = Time(0);
-//        marker.ns = "none";
+        marker.ns = "none";
         marker.action = visualization_msgs::Marker::ADD;
         marker.type = visualization_msgs::Marker::CYLINDER;
         marker.pose.orientation.w = 1.0;
@@ -24,7 +24,8 @@ public:
 		marker.color.a = 1.0; 		
 	}
 
-	void setParams(std::string ns, geometry_msgs::Pose pose, double scale, std_msgs::ColorRGBA color, int id = 0, float alpha = 1.0, int type = 3) {
+	void setParams(bool operation, std::string frame, std::string ns, geometry_msgs::Pose pose, double scale, std_msgs::ColorRGBA color, int id = 0, float alpha = 1.0, int type = 3) {
+		marker.header.frame_id = frame;
 		marker.id = id;
         marker.ns = ns;
 		marker.pose = pose;
@@ -33,6 +34,10 @@ public:
 		marker.color = color;
         marker.color.a = alpha;
         marker.type = type;
+		if(!operation) {
+			marker.action = visualization_msgs::Marker::DELETE;
+
+		}
 	}
 
 	visualization_msgs::Marker getMarker() {

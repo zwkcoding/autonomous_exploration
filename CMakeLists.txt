@@ -19,6 +19,7 @@ find_package(catkin REQUIRED COMPONENTS
   internal_grid_map
   grid_map_ros
   path_transform_planner
+  car_model
 
 )
 

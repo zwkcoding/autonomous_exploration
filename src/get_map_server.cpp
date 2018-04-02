@@ -104,9 +104,12 @@ int main(int argc, char **argv)
 	NodeHandle n;
     ros::NodeHandle private_nh_("~");
     int obstacle_value = 0;
+	std::string map_topic_name;
     private_nh_.param<int>("LETHAL_OBSTACLE", obstacle_value, 80);
+	private_nh_.param<std::string>("map_topic_name", map_topic_name, "/cover_map");
     g_obstacle_threshold = obstacle_value;
-	Subscriber sub = n.subscribe("/global_map", 10, mapUpdate);
+
+	Subscriber sub = n.subscribe(map_topic_name, 10, mapUpdate);
 
 	ServiceServer ss = n.advertiseService("current_map", mapCallback);
 

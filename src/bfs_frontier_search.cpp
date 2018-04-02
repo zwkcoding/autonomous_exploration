@@ -6,19 +6,60 @@
 
 namespace frontier_exploration {
 
-    FrontierSearch::FrontierSearch(const nav_msgs::OccupancyGrid &mapData)
+    FrontierSearch::FrontierSearch()
             :polygon_length_(50.0),
              polygon_width_(50.0),
+             min_frontiers_nums_(20),
              search_radius(50),
-             min_search_dis(5),
-             map_(mapData),
-             map_data_(mapData.data) {
+             min_search_dis(2){
+
+        lines_pub = nh.advertise<visualization_msgs::Marker>( "roi_area_shapes", 2);
+
+        points.ns = line.ns = "bfs_frontier";
+        points.id = 0;
+        line.id = 1;
+        points.type = points.POINTS;
+        line.type = line.LINE_STRIP;
+
+//Set the marker action.  Options are ADD, DELETE, and new in ROS Indigo: 3 (DELETEALL)
+        points.action = points.ADD;
+        line.action = line.ADD;
+        points.pose.orientation.w = 1.0;
+        line.pose.orientation.w = 1.0;
+        line.scale.x = 0.08;
+        line.scale.y = 0.08;
+        points.scale.x = 0.6;
+        points.scale.y = 0.6;
+
+        line.color.r = 255.0 / 255.0;
+        line.color.g = 0.0 / 255.0;
+        line.color.b = 0.0 / 255.0;
+        points.color.r = 255.0 / 255.0;
+        points.color.g = 0.0 / 255.0;
+        points.color.b = 0.0 / 255.0;
+        points.color.a = 0.5;
+        line.color.a = 1.0;
+        points.lifetime = ros::Duration();
+        line.lifetime = ros::Duration();
+
+        addPolygon(polygon_width_, polygon_length_);
+
+
+    }
+
+    void FrontierSearch::getMap(const nav_msgs::OccupancyGrid &mapData) {
+        map_ = mapData;
+
         resolution_ = mapData.info.resolution;
         Xstartx_ = mapData.info.origin.position.x;
         Xstarty_ = mapData.info.origin.position.y;
         size_x_ = mapData.info.width;
         size_y_ = mapData.info.height;
+
+        points.header.frame_id = mapData.header.frame_id;
+        line.header.frame_id = mapData.header.frame_id;
     }
+
 
     void FrontierSearch::addPolygon(double length, double width) {
         hmpl::Vector2D<double>  first_point, second_point, third_point, fourth_point;
@@ -34,11 +75,11 @@ namespace frontier_exploration {
         fourth_point.x = third_point.x;
         fourth_point.y = first_point.y;
 
-        interest_polygon_area_.clear();
-        interest_polygon_area_.push_back(first_point);
-        interest_polygon_area_.push_back(second_point);
-        interest_polygon_area_.push_back(third_point);
-        interest_polygon_area_.push_back(fourth_point);
+        base_interest_polygon_area_.clear();
+        base_interest_polygon_area_.push_back(first_point);
+        base_interest_polygon_area_.push_back(second_point);
+        base_interest_polygon_area_.push_back(third_point);
+        base_interest_polygon_area_.push_back(fourth_point);
     }
 
     void FrontierSearch::updatePolygon(hmpl::Pose2D &current_pos) {
@@ -47,18 +88,37 @@ namespace frontier_exploration {
         double cos_theta = std::cos(base_theta);
         double sin_theta = std::sin(base_theta);
 
-        std::vector<hmpl::Vector2D<double> >::iterator p;
-        for (p = interest_polygon_area_.begin(); p < interest_polygon_area_.end(); p++) {
-             p->x = p->x * cos_theta - p->y * sin_theta + current_pos.position.x;
-             p->y = p->x * sin_theta + p->y * cos_theta + current_pos.position.y;
+        std::vector<hmpl::Vector2D<double> >::const_iterator p;
+        geometry_msgs::Point pt;
+        line.points.clear();
+
+        current_interest_polygon_area_.clear();
+        for (p = base_interest_polygon_area_.begin(); p < base_interest_polygon_area_.end(); p++) {
+            hmpl::Vector2D<double> vec;
+            vec.x = p->x * cos_theta - p->y * sin_theta + current_pos.position.x;
+            vec.y = p->x * sin_theta + p->y * cos_theta + current_pos.position.y;
+             pt.x = vec.x;
+             pt.y = vec.y;
+             line.points.push_back(pt);
+            current_interest_polygon_area_.push_back(vec);
         }
+        pt.x = current_interest_polygon_area_[0].x;
+        pt.y = current_interest_polygon_area_[0].y;
+        line.points.push_back(pt);
+
+
+        points.header.stamp = ros::Time(0);
+        line.header.stamp = ros::Time(0);
+
+
+        lines_pub.publish(line);
 
     }
 
 
     std::list<Frontier> FrontierSearch::searchFrom(unsigned int pos, hmpl::Pose2D &current_pos) {
 
-        addPolygon(polygon_width_, polygon_length_);
+
         updatePolygon(current_pos);
 
         std::list<Frontier> frontier_list;
@@ -98,7 +158,7 @@ namespace frontier_exploration {
             //iterate over 4-connected neighbourhood
             BOOST_FOREACH(unsigned int nbr, nhood4(idx, size_x_, size_y_)) {
                             //add to queue all free, unvisited cells, use descending search in case initialized on non-free cell
-                            if (map_data_[nbr] == FREE_SPACE && !visited_flag[nbr]) {
+                            if (map_.data[nbr] == FREE_SPACE && !visited_flag[nbr]) {
                                 visited_flag[nbr] = true;
                                 indexToReal(map_, nbr, extend_x, extend_y);
                                 float dist = pow((pow((extend_x - ref_x), 2) + pow((extend_y - ref_y), 2)), 0.5);
@@ -106,7 +166,7 @@ namespace frontier_exploration {
                                 // todo use local_map size
                                 {
                                  hmpl::Vector2D<double> point(extend_x, extend_y);
-                                    if(util::pointInPolygon(point, interest_polygon_area_)) {
+                                    if(util::pointInPolygon(point, current_interest_polygon_area_)) {
                                         bfs.push(nbr);
                                     }
                                 }
@@ -125,7 +185,7 @@ namespace frontier_exploration {
                                     Frontier new_frontier = buildNewFrontier(nbr, pos, frontier_flag);
                                     // todo consider vehicle width pass ability
                                     if(1) {
-                                        if (new_frontier.size > 15) {
+                                        if (new_frontier.size > min_frontiers_nums_) {
                                             frontier_list.push_back(new_frontier);
                                         }
                                     }
@@ -193,7 +253,7 @@ namespace frontier_exploration {
                                                        pow((double(ref_y) - double(wy)), 2.0));
                                 // not to consider too far scope, for fast speed
                                 hmpl::Vector2D<double> point(wx, wy);
-                                if (util::pointInPolygon(point, interest_polygon_area_)/*distance < search_radius*/) {
+                                if (util::pointInPolygon(point, current_interest_polygon_area_)/*distance < search_radius*/) {
                                     if (distance < output.min_distance) {
                                         output.min_distance = distance;
                                     }
@@ -220,11 +280,11 @@ namespace frontier_exploration {
         // faster method
         if(0) {
             //check that cell is unknown and not already marked as frontier
-            if (map_data_[idx] != NO_INFORMATION || frontier_flag[idx]) {
+            if (map_.data[idx] != NO_INFORMATION || frontier_flag[idx]) {
                 return false;
             }
             BOOST_FOREACH(unsigned int nbr, nhood4(idx, size_x_, size_y_)) {
-                            if (map_data_[nbr] == FREE_SPACE) {
+                            if (map_.data[nbr] == FREE_SPACE) {
                                 return true;
                             }
                         }
@@ -233,17 +293,17 @@ namespace frontier_exploration {
 
         if(1) {
             //check that cell is unknown and not already marked as frontier
-            if (map_data_[idx] != FREE_SPACE || frontier_flag[idx]) {
+            if (map_.data[idx] != FREE_SPACE || frontier_flag[idx]) {
                 return false;
             }
 
             // todo
             //frontier cells should have at least one cell in 4-connected neighbourhood that is free
             BOOST_FOREACH(unsigned int nbr, nhood8(idx, size_x_, size_y_)) {
-                            if (map_data_[nbr] == NO_INFORMATION) {
+                            if (map_.data[nbr] == NO_INFORMATION) {
                                 int no_inf_count = 0;
                                 BOOST_FOREACH(unsigned int nbrr, nhood8(nbr, size_x_, size_y_)) {
-                                                if (map_data_[nbrr] == NO_INFORMATION) {
+                                                if (map_.data[nbrr] == NO_INFORMATION) {
                                                     ++no_inf_count;
                                                 }
                                                 if (no_inf_count > 2) {
@@ -278,7 +338,7 @@ namespace frontier_exploration {
             bfs.pop();
 
             //return if cell of correct value is found
-            if (map_data_[idx] == val) {
+            if (map_.data[idx] == val) {
                 result = idx;
                 return true;
             }

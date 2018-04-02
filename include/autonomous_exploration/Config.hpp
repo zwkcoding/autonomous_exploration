@@ -22,6 +22,7 @@ namespace config {
         double vehicle_length;
         double vehicle_width;
         double base2back;
+        double vehicle_wheelbase;
     };
 
 } // end namespace motion_planning_libraries

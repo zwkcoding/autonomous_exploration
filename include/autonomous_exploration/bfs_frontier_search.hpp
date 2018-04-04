@@ -59,10 +59,10 @@ namespace frontier_exploration {
          */
         std::list<Frontier> searchFrom(unsigned int pos, hmpl::Pose2D &current_pos);
 
-        void setPolygonWidth(double r) { polygon_width_ = r; }
-
-        void setPolygonLength(double r) { polygon_length_ = r; }
-
+        int getMinFrontierNums() { return min_frontiers_nums_; }
+        void setMinFrontierNums(int  c) { min_frontiers_nums_ = c; };
+        double getPolygonRadius() { return polygon_length_ / 2; }
+        void setPolygonRadius(double c) { polygon_length_ = polygon_width_ =  2*c; };
 
     protected:
 
@@ -99,7 +99,7 @@ namespace frontier_exploration {
 
         double polygon_length_;
         double polygon_width_;
-        double min_frontiers_nums_;
+        int min_frontiers_nums_;
 
         ros::NodeHandle nh;
         ros::Publisher lines_pub;

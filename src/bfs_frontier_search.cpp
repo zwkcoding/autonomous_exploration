@@ -9,7 +9,7 @@ namespace frontier_exploration {
     FrontierSearch::FrontierSearch()
             :polygon_length_(50.0),
              polygon_width_(50.0),
-             min_frontiers_nums_(20),
+             min_frontiers_nums_(10),
              search_radius(50),
              min_search_dis(2){
 
@@ -31,8 +31,8 @@ namespace frontier_exploration {
         points.scale.x = 0.6;
         points.scale.y = 0.6;
 
-        line.color.r = 255.0 / 255.0;
-        line.color.g = 0.0 / 255.0;
+        line.color.r = 0.0 / 255.0;
+        line.color.g = 255.0 / 255.0;
         line.color.b = 0.0 / 255.0;
         points.color.r = 255.0 / 255.0;
         points.color.g = 0.0 / 255.0;

@@ -62,3 +62,10 @@ add_dependencies(explore_server ${autonomous_exploration_EXPORTED_TARGETS})
 add_executable(get_map_server src/get_map_server.cpp)
 target_link_libraries(get_map_server ${catkin_LIBRARIES})
 add_dependencies(get_map_server ${autonomous_exploration_EXPORTED_TARGETS})
+
+catkin_add_gtest(explore_server_test
+        tests/explore_server_test.cpp)
+
+target_link_libraries(explore_server_test
+        ${catkin_LIBRARIES}
+        )

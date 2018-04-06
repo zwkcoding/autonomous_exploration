@@ -9,9 +9,6 @@ find_package(catkin REQUIRED COMPONENTS
   roscpp
   rospy
   std_msgs
-  message_generation
-  actionlib_msgs
-  actionlib
   geometry_msgs
   nav_msgs
   visualization_msgs
@@ -20,28 +17,13 @@ find_package(catkin REQUIRED COMPONENTS
   grid_map_ros
   path_transform_planner
   car_model
-
+  iv_explore_msgs
 )
 
 find_package(Boost REQUIRED COMPONENTS system)
 
-add_action_files(
-  FILES
-  Explore.action
-)
-
-generate_messages(
-  DEPENDENCIES
-  std_msgs
-  actionlib_msgs
-  geometry_msgs
-  nav_msgs
-  visualization_msgs
-
-)
-
 catkin_package(
-  CATKIN_DEPENDS actionlib_msgs
+  CATKIN_DEPENDS  tf path_transform_planner internal_grid_map car_model iv_explore_msgs
   DEPENDS Boost
 )
 
@@ -53,15 +35,12 @@ include_directories(
 
 add_executable(explore_client src/explore_client.cpp)
 target_link_libraries(explore_client ${catkin_LIBRARIES})
-add_dependencies(explore_client ${autonomous_exploration_EXPORTED_TARGETS})
 
 add_executable(explore_server src/explore_server.cpp src/bfs_frontier_search.cpp)
 target_link_libraries(explore_server ${catkin_LIBRARIES})
-add_dependencies(explore_server ${autonomous_exploration_EXPORTED_TARGETS})
 
 add_executable(get_map_server src/get_map_server.cpp)
 target_link_libraries(get_map_server ${catkin_LIBRARIES})
-add_dependencies(get_map_server ${autonomous_exploration_EXPORTED_TARGETS})
 
 catkin_add_gtest(explore_server_test
         tests/explore_server_test.cpp)

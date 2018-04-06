@@ -1,0 +1,33 @@
+<launch>
+	<node name="get_map_server" pkg="autonomous_exploration" type="get_map_server">
+		<param name="obs_threshold" value= "80" />
+		<param name="receive_map_topic_name"  value="/cover_map"/>
+	</node>
+
+	<node name="explore_client" pkg="autonomous_exploration" type="explore_client" output="screen" />
+
+    <node name="explore_server" pkg="autonomous_exploration" type="explore_server" output="screen" >
+        <param name="local_map_frame_name" value= "base_link" />
+        <param name="global_map_frame_name" value= "/odom" />
+
+        <param name="sparse_distance_between_frontiers" value= "1.0" />
+        <param name="expect_info_radius" value= "2" />
+        <param name="min_unknown_cells_" value= "50" />
+        <param name="initial_roi_radius_" value= "25" />
+        <param name="max_roi_radius_" value= "50" />
+
+        <param name="vehicle_length" value= "4.9" />
+    	<param name="vehicle_width"  value="1.95"/>
+    	<param name="base2back" value= "1.09" />
+        <param name="vehicle_wheelbase"  value="2.86"/>
+        <param name="info_coeff"  value="1"/>
+        <param name="angle_coeff"  value="1"/>
+        <param name="dis_coeff"  value="1"/>
+        <param name="min_frontier_distance"  value="3"/>
+        <param name="obs_threshold"  value="80"/>
+        <param name="roi_size_gain_change"  value="1.2"/>
+
+	</node>
+
+
+</launch>

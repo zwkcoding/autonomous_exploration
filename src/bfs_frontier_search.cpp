@@ -9,11 +9,11 @@ namespace frontier_exploration {
     FrontierSearch::FrontierSearch()
             :polygon_length_(50.0),
              polygon_width_(50.0),
-             min_frontiers_nums_(10),
+             min_frontiers_nums_(5),
              search_radius(50),
              min_search_dis(2){
 
-        lines_pub = nh.advertise<visualization_msgs::Marker>( "roi_area_shapes", 2);
+        lines_pub = nh.advertise<visualization_msgs::Marker>( nh.getNamespace() + "roi_area_shapes", 2);
 
         points.ns = line.ns = "bfs_frontier";
         points.id = 0;
@@ -109,8 +109,6 @@ namespace frontier_exploration {
 
         points.header.stamp = ros::Time(0);
         line.header.stamp = ros::Time(0);
-
-
         lines_pub.publish(line);
 
     }
@@ -118,7 +116,8 @@ namespace frontier_exploration {
 
     std::list<Frontier> FrontierSearch::searchFrom(unsigned int pos, hmpl::Pose2D &current_pos) {
 
-
+        // update original polygon cuz polygon size is changing!
+        addPolygon(polygon_width_, polygon_length_);
         updatePolygon(current_pos);
 
         std::list<Frontier> frontier_list;
@@ -146,7 +145,7 @@ namespace frontier_exploration {
             bfs.push(pos);
             indexToReal(map_, pos, ref_x, ref_y);
 
-            ROS_WARN("Could not find nearby clear cell to start search");
+            ROS_ERROR("Could not find nearby clear cell to start search, use start cell");
         }
         visited_flag[bfs.front()] = true;
 
@@ -163,7 +162,6 @@ namespace frontier_exploration {
                                 indexToReal(map_, nbr, extend_x, extend_y);
                                 float dist = pow((pow((extend_x - ref_x), 2) + pow((extend_y - ref_y), 2)), 0.5);
                                 // not to flood too far scope, for fast speed
-                                // todo use local_map size
                                 {
                                  hmpl::Vector2D<double> point(extend_x, extend_y);
                                     if(util::pointInPolygon(point, current_interest_polygon_area_)) {
@@ -180,10 +178,8 @@ namespace frontier_exploration {
                                 indexToReal(map_, nbr, extend_x, extend_y);
                                 float dist = pow((pow((extend_x - ref_x), 2) + pow((extend_y - ref_y), 2)), 0.5);
                                 frontier_flag[nbr] = true;
-                                // todo use minimal distance
                                 if(dist > min_search_dis) {
                                     Frontier new_frontier = buildNewFrontier(nbr, pos, frontier_flag);
-                                    // todo consider vehicle width pass ability
                                     if(1) {
                                         if (new_frontier.size > min_frontiers_nums_) {
                                             frontier_list.push_back(new_frontier);
@@ -257,8 +253,12 @@ namespace frontier_exploration {
                                     if (distance < output.min_distance) {
                                         output.min_distance = distance;
                                     }
-                                    //add to queue for breadth first search
-                                    bfs.push(nbr);
+                                    // todo strict??
+                                    if(distance > min_search_dis) {
+
+                                        //add to queue for breadth first search
+                                        bfs.push(nbr);
+                                    }
                                 }
 
                             }

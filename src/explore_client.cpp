@@ -2,9 +2,9 @@
 #include <visualization_msgs/Marker.h>
 #include <actionlib/client/simple_action_client.h>
 #include <actionlib/client/terminal_state.h>
-#include <autonomous_exploration/ExploreAction.h>
+#include <iv_explore_msgs/ExploreAction.h>
 
-using namespace autonomous_exploration;
+using namespace iv_explore_msgs;
 
 bool complete_flag = false;
 // Called once when the goal completes
@@ -13,8 +13,8 @@ void doneCb(const actionlib::SimpleClientGoalState& state,
 {
 	ROS_INFO("Explore actionclient:Finished in state [%s]", state.toString().c_str());
 	ROS_INFO("Explore actionclient Answer: ");
-    std::cout << std::boolalpha << result->success_flag << '\n';
-    complete_flag = true;
+	std::cout << std::boolalpha << result->success_flag << '\n';
+	complete_flag = true;
 }
 
 // Called once when the goal becomes active
@@ -29,12 +29,12 @@ int main(int argc, char **argv)
 	ros::init(argc, argv, "explore_action_client");
 	ros::NodeHandle n;
 
-	autonomous_exploration::ExploreGoal goal;
-	autonomous_exploration::ExploreResultConstPtr feedback;
+    iv_explore_msgs::ExploreGoal goal;
+    iv_explore_msgs::ExploreResultConstPtr feedback;
 	bool success;
 	char ch;
 
-	actionlib::SimpleActionClient<autonomous_exploration::ExploreAction> ac("explore", true);
+	actionlib::SimpleActionClient<iv_explore_msgs::ExploreAction> ac("explore", true);
 	
 	ROS_INFO("Waiting for action server to start.");
 	ac.waitForServer();
@@ -55,7 +55,6 @@ int main(int argc, char **argv)
 //        actionlib::SimpleClientGoalState state = ac.getState();
 //        ROS_INFO("Action finished: %s", state.toString().c_str());
         feedback = ac.getResult();
-
 
         /*std::cin>>ch;
         if(ch=='c') {

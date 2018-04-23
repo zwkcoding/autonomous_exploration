@@ -164,7 +164,7 @@ namespace frontier_exploration {
                                 // not to flood too far scope, for fast speed
                                 {
                                  hmpl::Vector2D<double> point(extend_x, extend_y);
-                                    if(util::pointInPolygon(point, current_interest_polygon_area_)) {
+                                    if(1/*util::pointInPolygon(point, current_interest_polygon_area_)*/) {
                                         bfs.push(nbr);
                                     }
                                 }
@@ -249,7 +249,7 @@ namespace frontier_exploration {
                                                        pow((double(ref_y) - double(wy)), 2.0));
                                 // not to consider too far scope, for fast speed
                                 hmpl::Vector2D<double> point(wx, wy);
-                                if (util::pointInPolygon(point, current_interest_polygon_area_)/*distance < search_radius*/) {
+                                if (1/*util::pointInPolygon(point, current_interest_polygon_area_)*//*distance < search_radius*/) {
                                     if (distance < output.min_distance) {
                                         output.min_distance = distance;
                                     }

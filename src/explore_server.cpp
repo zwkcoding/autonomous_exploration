@@ -31,6 +31,7 @@
 using namespace tf;
 using namespace ros;
 using namespace frontier_exploration;
+using namespace cv;
 
 #define DEBUG
 
@@ -99,9 +100,9 @@ public:
         filtered_frontier_pub_ = nh_.advertise<visualization_msgs::MarkerArray>("filtered_frontier_marker", 1);
         sparsed_frontier_pub_ = nh_.advertise<visualization_msgs::MarkerArray>("sparsed_frontier_marker", 1);
         sorted_frontier_pub_ = nh_.advertise<visualization_msgs::MarkerArray>("sorted_frontier_marker", 1);
-
-        mGetMapClient_ = nh_.serviceClient<nav_msgs::GetMap>(std::string("current_map"));
-        mGetBinaryMapClient_ = nh_.serviceClient<nav_msgs::GetMap>(std::string("binary_map"));
+        final_frontier_pub_ = nh_.advertise<visualization_msgs::MarkerArray>("final_frontier_marker", 1);
+        mGetMapClient_ = nh_.serviceClient<nav_msgs::GetMap>(std::string("global_map"));
+        mGetCoverMapClient_ = nh_.serviceClient<nav_msgs::GetMap>(std::string("cover_map"));
 
 //        start_sub_ = nh_.subscribe("/initialpose", 1, &ExploreAction::startCb, this);
         path_publisher_ = nh_.advertise<nav_msgs::Path>("PT_path", 1, true);
@@ -143,6 +144,8 @@ public:
         pnode_->param<int>("min_unknown_cells_", min_unknown_cells_, 50);
         pnode_->param<double>("initial_roi_radius_", initial_roi_radius_, 25);
         pnode_->param<double>("max_roi_radius_", max_roi_radius_, 50);
+        pnode_->param<double>("explored_rate_thresh", explored_rate_thresh_, 80);
+
 
 
         double xinit_ = 0, yinit_ = 0;
@@ -276,7 +279,7 @@ public:
         std::vector<PoseWrap> final_goals;
         // set scalable ROI size for bfs extracting frontier routine
         double roi_radius = initial_roi_radius_;
-
+        static bool use_cover_map = false;
         auto start = hmpl::now();
         while (ok() && as_.isActive() && roi_radius <= max_roi_radius_ ) {
             loop_rate.sleep();
@@ -297,28 +300,44 @@ public:
                 return;
             }
 
-            if (!getMap()) {
-                ROS_ERROR("Could not get a map");
-                as_.setPreempted();
-                return;
+            if(!use_cover_map) {
+                if (!getMap()) {
+                    ROS_ERROR("Could not get a Global map");
+                    as_.setPreempted();
+                    return;
+                }
+            } else {
+                if (!getCoverMap()) {
+                    ROS_ERROR("Could not get a Cover map");
+                    as_.setPreempted();
+                    return;
+                }
+
             }
 
             unsigned int pos_index;
             if (!mCurrentMap_.getCurrentPosition(pos_index)) {
-                ROS_ERROR("Could not get a position");
                 as_.setPreempted();
+                // todo outside of area, go back
                 return;
             }
 
-            if (!getBinaryMap()) {
-                ROS_ERROR("Could not get a Binary map");
-                as_.setPreempted();
-                return;
-            }
+            binary_ogm_ = mCurrentMap_.getMap();
+            /*cv::Mat m1 = cv::Mat(binary_ogm_.info.height, binary_ogm_.info.width,
+                                 CV_8UC1);
+            cv::Mat mat_src = cv::Mat(binary_ogm_.info.height, binary_ogm_.info.width, CV_8SC1);
+            //copy vector to mat
+            memcpy(mat_src.data, binary_ogm_.data.data(), binary_ogm_.data.size() * sizeof(signed char));
+            mat_src.setTo(cv::Scalar(0), mat_src == -1);
+
+            mat_src.convertTo(m1, CV_8UC1);
+            imshow("binary_test", m1);
+            waitKey(1);
+            binary_ogm_.data.assign((int8_t*)m1.datastart, (int8_t*)m1.dataend);*/
 
             // Initialize gridmap with ogm (all is same)
             grid_map::GridMapRosConverter::fromOccupancyGrid(binary_ogm_, igm_.obs, igm_.maps);
-            // value replacement  todo convert to cv::mat, use setTo
+            // value replacement
             grid_map::Matrix& grid_data = igm_.maps[igm_.obs];
             size_t size_x = igm_.maps.getSize()(0);
             size_t size_y = igm_.maps.getSize()(1);
@@ -331,6 +350,10 @@ public:
                         grid_data(idx_x, idx_y) = igm_.FREE;
                     } else if(100.0 == grid_data(idx_x, idx_y)) {
                         grid_data(idx_x, idx_y) = igm_.OCCUPY;
+                    } else {
+//                    grid_data(idx_x, idx_y) = igm_.OCCUPY;
+                        // warn : view unknown as free
+                        grid_data(idx_x, idx_y) = igm_.FREE;
                     }
                 }
             }
@@ -339,7 +362,11 @@ public:
             // update roi_radius for bfs frontiers extracting func
             bfs_searcher_.setPolygonRadius(roi_radius);
             // find frontier points(no filter)
-            frontier_array = exploreByBfs(&mCurrentMap_, pos_index);
+            if(!use_cover_map) {
+                frontier_array = exploreByBfs(&mCurrentMap_, pos_index);
+            } else {
+                frontier_array =  detectFrontiersByOpenCV(mCurrentMap_.getMap());
+            }
             ROS_INFO("origin frontier size : %d", frontier_array.size());
 
             // filter frontier points(collision, isolated-frontiers--no info_gain)
@@ -353,8 +380,29 @@ public:
                                  CV_8UC1);
             //copy vector to mat
             memcpy(m.data, tmp.data.data(), tmp.data.size() * sizeof(signed char));
+//            imshow("m0", m);
             m.setTo(cv::Scalar(120), m == -1);
+//            imshow("m1", m);
+//            m0.setTo(cv::Scalar(120), m == -1);
+//            m0.setTo(cv::Scalar(0), m == 0);
+//            m0.setTo(cv::Scalar(100), m == 100);
+
             m.convertTo(m0, CV_8UC1);
+//            imshow("m0", m0);
+            cv::waitKey(1);
+
+            cv::Mat roiMat = m0.clone();
+//        std::cerr << roiMat.type() << " " << roiMat.channels() << " " << roiMat.size() << std::endl;
+
+            cv::threshold( roiMat, roiMat, 110, 255, cv::THRESH_BINARY);
+            int count_white = cv::countNonZero(roiMat); // white cell is unknown cell
+            int rows = roiMat.rows;
+            int cols = roiMat.cols;
+            double explored_rate = 100.0 - count_white * 100.0 / (rows * cols);
+            if(explored_rate > explored_rate_thresh_) {
+                use_cover_map = true;
+            }
+            ROS_WARN_THROTTLE(3, "USE COVER MAP FLAG : %s", false == use_cover_map ? "FALSE":"TRUE");
 
             int info_radius = static_cast<int> (expect_info_radius_ / resolution);
             // todo filter initial frontier on vehicle body when vehicle start at first
@@ -370,12 +418,13 @@ public:
                             unsigned int Y = (y - originY) / resolution;
                             if (this->igm_.maps.isInside(pos)) {
                                 double clearance = this->igm_.getObstacleDistance(pos);
-                                if (clearance < config_.vehicle_length / 2) {
+                                if (clearance < config_.vehicle_length * 1.5 / 2) {
                                     // the big circle is not collision-free, then do an exact
                                     // collision checking
                                 } else { // collision-free
                                     if( mCurrentMap_.getIndex(X, Y, index) ) {
                                          int unknown_cells = countUnknownCells(m0, info_radius, X, Y);
+                                        // 40% occupancy
                                          if(unknown_cells > min_unknown_cells_) {
                                              // filter isolated frontiers(circle)
                                             filtered_frontier_array.push_back(point);
@@ -476,13 +525,13 @@ public:
         if (as_.isActive()) {
             if (final_goals.size() > 0 && 1 == goalReached_) {
                 as_.setSucceeded();
-                ROS_INFO("Exploration was finished");
+                ROS_WARN("Exploration was finished");
             } else {
                 as_.setAborted();
-                ROS_INFO("Exploration was failed: maybe really no frontier(search area is max!) or goal is unaccessible!!!");
+                ROS_WARN("Exploration was failed: maybe really no frontier(search area is max!) or goal is unaccessible!!!");
             }
         } else {
-            ROS_INFO("Explore action server was prempted!!");
+            ROS_WARN("Explore action server was prempted!!");
 //            as_.setPreempted();
         }
     }
@@ -734,10 +783,10 @@ private:
                             max_robot_goal_dist = distance2goal;
                         }
 //                        // Goal poses which are too close to the robot are discarded.
-//                        if(distance2goal < config_.min_goal_distance) {
-//                            too_close_counter++;
-//                            continue;
-//                        }
+                        if(distance2goal < config_.min_goal_distance) {
+                            too_close_counter++;
+                            continue;
+                        }
 
                         unsigned int X = (gx - origin_x) / resolution;
                         unsigned int Y = (gy - origin_y) / resolution;
@@ -783,14 +832,14 @@ private:
         std::vector<unsigned int> goal_list;
         std::vector<int> type_array;
         int type = 0;
-        ROS_INFO("Exploration point list:\n");
+       // ROS_INFO("Exploration point list:\n");
         for (auto rit = expl_point_list.crbegin(); rit != expl_point_list.crend(); ++rit) {
             expl_rbs = rit->explPose;
             goals.push_back(expl_rbs);
-            ROS_INFO(
-                    "Point(%4.2f, %4.2f, %4.2f) values: overall(%4.2f), expl(%4.2f), ang(%4.2f), dist(%4.2f)\n",
-                    rit->explPose.x, rit->explPose.y, rit->explPose.theta, rit->overallValue,
-                    rit->expl_value, rit->ang_value, rit->dist_value);
+        //    ROS_INFO(
+        //            "Point(%4.2f, %4.2f, %4.2f) values: overall(%4.2f), expl(%4.2f), ang(%4.2f), dist(%4.2f)\n",
+        //            rit->explPose.x, rit->explPose.y, rit->explPose.theta, rit->overallValue,
+        //            rit->expl_value, rit->ang_value, rit->dist_value);
             unsigned int x = (rit->explPose.x - origin_x) / mCurrentMap_.getResolution();
             unsigned int y = (rit->explPose.y - origin_y) / mCurrentMap_.getResolution();
             unsigned int index;
@@ -817,7 +866,161 @@ private:
         return goals;
     }
 
-    std::vector<geometry_msgs::Point> exploreByBfs(GridMap *map, unsigned int start) {
+    std::vector<geometry_msgs::Point> detectFrontiersByOpenCV(const nav_msgs::OccupancyGrid &map) {
+        std::vector<geometry_msgs::Point> frontiers;
+        cv::Mat m1 = cv::Mat(map.info.height, map.info.width,
+                             CV_8SC1); // initialize matrix of signed char of 1-channel where you will store vec data
+        cv::Mat mat_src = cv::Mat(map.info.height, map.info.width, CV_8UC1);
+        //copy vector to mat
+        memcpy(m1.data, map.data.data(), map.data.size() * sizeof(signed char));
+//        imshow("ooooo+", m1);
+
+//        Mat m0;
+//        m1.copyTo(m0);
+
+        mat_src.setTo(cv::Scalar(205), m1 == -1);
+        mat_src.setTo(cv::Scalar(0), m1 == 100);
+        mat_src.setTo(cv::Scalar(255), m1 == 0);
+
+//        mat_src.convertTo(mat_src, CV_8UC1);
+//        imshow("delete_000000000bs+", mat_src);
+
+
+        int thresh = 30;
+        cv::Mat tmp, tmp_canny_output;
+        inRange(mat_src, 0, 1, tmp);
+
+        blur(mat_src, mat_src, Size(3, 3)); //滤波
+        Canny(mat_src, tmp_canny_output, thresh, thresh * 3, 3);
+
+
+
+
+//        GaussianBlur( mat_src, mat_src, Size(3,3), 0.1, 0, BORDER_DEFAULT );
+
+        //定义Canny边缘检测图像
+        Mat canny_output, canny_output_r, dst;
+        std::vector<std::vector<Point2i>> contours;
+        std::vector<Vec4i> hierarchy;
+        //利用canny算法检测边缘
+        Canny(tmp, canny_output, thresh, thresh * 3, 3);
+//        namedWindow("canny", CV_WINDOW_AUTOSIZE);
+//        flip(canny_output, canny_output_r, 0);
+//        imshow("canny", canny_output_r);
+//        moveWindow("canny", 550, 20);
+        //查找轮廓
+        findContours(canny_output, contours, hierarchy, CV_RETR_TREE, CV_CHAIN_APPROX_SIMPLE, Point2i(0, 0));
+        drawContours(tmp, contours, -1, 255, 5);
+        bitwise_not(tmp, tmp);
+        bitwise_and(tmp, tmp_canny_output, dst);
+//        imshow("delete_obs", dst);
+        findContours(dst, contours, hierarchy, CV_RETR_TREE, CV_CHAIN_APPROX_SIMPLE, Point2i(0, 0));
+        drawContours(dst, contours, -1, 255, 1);
+        imshow("frontiers", dst);
+
+        //计算轮廓矩
+        std::vector<Moments> mu(contours.size());
+        for (int i = 0; i < contours.size(); i++) {
+            mu[i] = moments(contours[i], false);
+        }
+        //计算轮廓的质心
+        std::vector<Point2f> mc(contours.size());
+        for (int i = 0; i < contours.size(); i++) {
+            mc[i] = Point2d(mu[i].m10 / mu[i].m00, mu[i].m01 / mu[i].m00);
+        }
+        //画轮廓及其质心并显示
+        Mat drawing = Mat::zeros(dst.size(), CV_8UC3);
+        RNG G_RNG(1234);
+
+        for (int i = 0; i < contours.size(); i++) {
+            Scalar color = Scalar(G_RNG.uniform(0, 255), G_RNG.uniform(0, 255), G_RNG.uniform(0, 255));
+            drawContours(drawing, contours, i, color, 2, 8, hierarchy, 0, Point2i());
+            circle(drawing, mc[i], 5, Scalar(0, 0, 255), -1, 8, 0);
+//            rectangle(drawing, boundingRect(contours.at(i)), cvScalar(0, 255, 0));
+            char tam[100];
+            sprintf(tam, "(%0.0f,%0.0f)", mc[i].x, mc[i].y);
+//            putText(drawing, tam, Point(mc[i].x, mc[i].y), FONT_HERSHEY_SIMPLEX, 0.4, cvScalar(255, 0, 255), 1);
+        }
+        flip(drawing, drawing, 0);
+        namedWindow("Contours", CV_WINDOW_AUTOSIZE);
+        imshow("Contours", drawing);
+//        moveWindow("Contours", 1100, 20);
+
+        if (0) {
+            //对每个轮廓的点集 找逼近多边形
+            std::vector<std::vector<Point2i>> approxPoint(contours.size());
+            for (int i = 0; i < (int) contours.size(); i++) {
+                approxPolyDP(contours[i], approxPoint[i], 3, true);
+            }
+
+            /******************************************绘制曲线的方式********************************************/
+            //用绘制轮廓的函数   绘制曲线
+            Mat drawImage = Mat::zeros(dst.size(), CV_8UC3);
+            for (int i = 0; i < (int) contours.size(); i++) {
+                Scalar color = Scalar(G_RNG.uniform(0, 255), G_RNG.uniform(0, 255), G_RNG.uniform(0, 255));
+                // 绘制凸包
+                drawContours(drawImage, approxPoint, i, color, 1);
+
+//                drawContours(drawImage, contours, i, Scalar(255, 255, 255), 1);
+            }
+//            flip(drawImage, drawImage, 0);
+
+            imshow("lines", drawImage);
+        } else {
+            cv::Mat mat_canny, mat_canny_bgr;
+            cv::RNG rng(0xFFFFFFFF);
+//            Canny(dst, mat_canny, 50, 200);
+//            imshow("delete_obs++", mat_canny);
+
+            cvtColor(dst, mat_canny_bgr, CV_GRAY2BGR);
+            std::vector<cv::Vec4f> lines;
+            // Resolution: 1 px and 180/32 degree. last two para is important!
+            HoughLinesP(dst, lines, 1, CV_PI / 32, 20, 20, 5);
+            geometry_msgs::Point vec;
+            for (size_t i = 0; i < lines.size(); i++) {
+                cv::Vec4i l = lines[i];
+                Scalar color = Scalar(G_RNG.uniform(0, 255), G_RNG.uniform(0, 255), G_RNG.uniform(0, 255));
+
+                line(mat_canny_bgr, cv::Point(l[0], l[1]), cv::Point(l[2], l[3]), color, 1, 8);
+                Point2f pt;
+                pt.x = (l[0] + l[2]) / 2;
+                pt.y = (l[1] + l[3]) / 2;
+                circle(mat_canny_bgr, pt, 5, Scalar(0, 0, 255), -1, 8, 0);
+
+                vec.x = (l[0] + l[2]) / 2 * mCurrentMap_.getResolution() + mCurrentMap_.getOriginX();
+                vec.y = (l[1] + l[3]) / 2 * mCurrentMap_.getResolution() + mCurrentMap_.getOriginY();
+                vec.z = std::atan2(l[3] - l[1], l[2] - l[0]);
+               /* {
+                    int num_pixels_to_check = 10;
+                    double expl_point_orientation = vec.theta;
+                    int count_theta = countBlackPixels(mat_src, vec, num_pixels_to_check);
+                    vec.theta = expl_point_orientation + M_PI;
+                    int count_theta_pi = countBlackPixels(mat_src, vec, num_pixels_to_check);
+                    if (abs(count_theta - count_theta_pi) >= 4) { // Difference is big enough.
+                        if (count_theta_pi > count_theta) { // Use orientation with more black / unknown pixels.
+                            expl_point_orientation = expl_point_orientation + M_PI;
+                        }
+                    }
+                    vec.theta = expl_point_orientation;  //[0, 2pi]
+                }*/
+
+                frontiers.push_back(vec);
+            }
+            ROS_INFO("line number is %d", frontiers.size());
+
+            flip(mat_canny_bgr, mat_canny_bgr, 0);
+            namedWindow("lines", CV_WINDOW_AUTOSIZE);
+            cv::imshow("lines", mat_canny_bgr);
+//            moveWindow("lines", 550, 20);
+
+        }
+
+        cv::waitKey(1);
+        return frontiers;
+    }
+
+
+        std::vector<geometry_msgs::Point> exploreByBfs(GridMap *map, unsigned int start) {
         ROS_INFO("Starting exploration");
 
 //        map->clearArea(start);
@@ -903,15 +1106,70 @@ private:
         // todo at now, max chosen numbers is 10
         int max = goal_lists.size() > 10 ? 10 : goal_lists.size();
         geometry_msgs::Pose pose;
-        for(int i = 0; i < max; i++) {
-            pose.position.x = goal_lists[i].x;
-            pose.position.y = goal_lists[i].y;
-            tf::quaternionTFToMsg(tf::createQuaternionFromYaw(goal_lists[i].theta),
-                                                              pose.orientation);
-            move_goal.goals.poses.push_back(pose);
+        std::vector<geometry_msgs::Point> final_frontier_array;
+        geometry_msgs::Point point;
+
+        if(0) {
+            for (int i = 0; i < max; i++) {
+                point.x = pose.position.x = goal_lists[i].x;
+                point.y = pose.position.y = goal_lists[i].y;
+                tf::quaternionTFToMsg(tf::createQuaternionFromYaw(goal_lists[i].theta), pose.orientation);
+                final_frontier_array.push_back(point);
+                move_goal.goals.poses.push_back(pose);
+            }
+        } else {
+            if(goal_lists.size() < 5) {
+                for (int i = 0; i < goal_lists.size(); i++) {
+                    pose.position.x = goal_lists[i].x;
+                    pose.position.y = goal_lists[i].y;
+                    tf::quaternionTFToMsg(tf::createQuaternionFromYaw(goal_lists[i].theta), pose.orientation);
+
+                    move_goal.goals.poses.push_back(pose);
+                }
+            } else {
+                size_t idx = 0;
+                while (idx < goal_lists.size() - 2) {
+                    //std::cout << "idx: " << idx << " size: " << path_in.size() <<  "\n";
+                    const PoseWrap &current_index = goal_lists[idx];
+
+                    for (size_t test_idx = idx + 2; test_idx < goal_lists.size(); ++test_idx) {
+                        const PoseWrap &test_index = goal_lists[test_idx];
+
+                        if (util::calcDistance(current_index.x, current_index.y, test_index.x, test_index.y) > 5) {
+                            idx = test_idx - 1;
+                            break;
+                        } else {
+                            if (test_idx == (goal_lists.size() - 1)) {
+                                idx = test_idx;
+                                break;
+                            }
+                        }
+                    }
+
+                    point.x = pose.position.x = goal_lists[idx].x;
+                    point.y = pose.position.y = goal_lists[idx].y;
+                    tf::quaternionTFToMsg(tf::createQuaternionFromYaw(goal_lists[idx].theta), pose.orientation);
+
+                    move_goal.goals.poses.push_back(pose);
+                    final_frontier_array.push_back(point);
+                    if(move_goal.goals.poses.size() > 9) {
+                        break;
+                    }
+
+                }
+            }
+
         }
 
-        ROS_INFO("Sending goal to astar_action_server");
+#ifdef DEBUG
+
+        if(final_frontier_pub_.getNumSubscribers() > 0) {
+            publishMarkerArray(final_frontier_pub_, "final_frontiers", final_frontier_array);
+        }
+#endif
+
+
+        ROS_WARN("Start sending goal to astar_action_server");
         ac_.sendGoal(move_goal, boost::bind(&ExploreAction::doneCb, this, _1, _2),
                      actionlib::SimpleActionClient<iv_explore_msgs::PlannerControlAction>::SimpleActiveCallback(),
                      boost::bind(&ExploreAction::feedbackCb, this, _1));
@@ -951,7 +1209,7 @@ private:
         nav_msgs::GetMap srv;
 
         if (!mGetMapClient_.call(srv)) {
-            ROS_INFO("Could not get a map.");
+            ROS_INFO("Could not get a Global map.");
             return false;
         }
 
@@ -962,22 +1220,20 @@ private:
         return true;
     }
 
-    bool getBinaryMap() {
-        if (!mGetBinaryMapClient_.isValid()) {
+    bool getCoverMap() {
+        if (!mGetCoverMapClient_.isValid()) {
             return false;
         }
 
         nav_msgs::GetMap srv;
 
-        if (!mGetBinaryMapClient_.call(srv)) {
-            ROS_INFO("Could not get a Binary map.");
+        if (!mGetCoverMapClient_.call(srv)) {
+            ROS_INFO("Could not get a Cover map.");
             return false;
         }
 
-        binary_ogm_ = srv.response.map;
-//        unsigned int  mMapWidth = binary_ogm_.info.width;
-//        unsigned int mMapHeight = binary_ogm_.info.height;
-//        ROS_INFO("Got new binary map of size %d x %d", mMapWidth, mMapHeight);
+        mCurrentMap_.update(srv.response.map);
+
 
         return true;
     }
@@ -1145,12 +1401,13 @@ protected:
     Publisher filtered_frontier_pub_;
     Publisher sparsed_frontier_pub_;
     Publisher sorted_frontier_pub_;
+    Publisher final_frontier_pub_;
 
     Publisher binary_gom_pub_;
     Publisher path_publisher_;
     Subscriber start_sub_;
     hmpl::InternalGridMap igm_;
-    ServiceClient mGetBinaryMapClient_;
+    ServiceClient mGetCoverMapClient_;
     nav_msgs::OccupancyGrid binary_ogm_;
 
     hmpl::Pose2D start_point_;
@@ -1171,6 +1428,7 @@ private:
     double sparse_dis_;
     double expect_info_radius_;
     double initial_roi_radius_, max_roi_radius_;
+    double explored_rate_thresh_;
 };
 
 int main(int argc, char **argv) {

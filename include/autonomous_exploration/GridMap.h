@@ -125,7 +125,7 @@ public:
 
         if(!getIndex(X, Y, index))
         {
-            ROS_ERROR("Is the robot out of the map?");
+            ROS_ERROR("Is the vehicle out of the map?");
             return false;
         }
         current_pose_local.position.x = x;
@@ -135,7 +135,7 @@ public:
 //                          current_pose_local.position.x, current_pose_local.position.y,
 //                          tf::getYaw(current_pose_local.orientation) * 180 / M_PI);
 
-        ROS_INFO("Robot's coordinates are %d, %d \n", X, Y);
+        ROS_INFO("Vehicle's odom coordinates are %d, %d \n", X, Y);
 
 	    return true;
     }
@@ -230,7 +230,6 @@ public:
 		ROS_DEBUG("Current cell area minVal: %d", minVal);
 		ROS_DEBUG("Current cell area maxVal: %d", maxVal);
 
-		// todo zwk
 		if(maxVal < mLethalCost) return true;
 		return false;
 	}
@@ -257,7 +256,6 @@ public:
             ROS_DEBUG("Map resolution: %f", getResolution());
             return uFunction(index) > mGainConst;
         }
-        // todo index circle-limit , bfs/rrt-sampling frontier search
 //        if (getData(index) != NO_INFORMATION || frontier_flag[idx]) {
 //            return false;
 //        }

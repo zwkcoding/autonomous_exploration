@@ -1,27 +1,28 @@
 <launch>
 
-<!-- mkz -->
+<!-- mkz
 <arg name="robot_length" value="4.93"/>
 <arg name="robot_width" value="2.45"/>
 <arg name="robot_wheelbase" value="2.85"/>
 <arg name="base2back" value="1.100"/>
 <arg name="minimum_turning_radius" value="5.5"/>
+-->
 
-
-<!-- toyata
+<!-- toyata -->
 <arg name="robot_length" value="4.9"/>
 <arg name="robot_width" value="1.95"/>
 <arg name="robot_wheelbase" value="2.86"/>
 <arg name="base2back" value="1.0"/>
 <arg name="minimum_turning_radius" value="5"/>
--->
 
 
+<!--
     <node name="udp_revfrom_camera_node" pkg="udp_revfrom_camera" type="udp_revfrom_camera_node" output="screen" >
    		<param name="local_ip" value= "192.168.1.6" />
    		<param name="local_port" value="9999" />
    		<param name="send_object_send_topic_name" value="/object_status" />
    	</node>
+-->
 
 
 	<node name="get_map_server" pkg="autonomous_exploration" type="get_map_server">
@@ -44,7 +45,7 @@
         <param name="min_unknown_cells_" value= "50" />
         <param name="initial_roi_radius_" value= "50" />
         <param name="max_roi_radius_" value= "100" />
-        <param name="explored_rate_thresh" value= "40.0" />
+        <param name="explored_rate_thresh" value= "60.0" />
 
         <param name="vehicle_length" value= "$(arg robot_length)" />
     	<param name="vehicle_width"  value="$(arg robot_width)"/>

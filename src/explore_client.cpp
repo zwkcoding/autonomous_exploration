@@ -80,7 +80,7 @@ int main(int argc, char **argv)
 //        complete_flag = false;
         ac.sendGoal(goal);
         // block here
-        success = ac.waitForResult(ros::Duration(15.0));
+        success = ac.waitForResult(ros::Duration(25.0));
         if (success) {
             actionlib::SimpleClientGoalState state = ac.getState();
             ROS_WARN("Action finished: %s",state.toString().c_str());

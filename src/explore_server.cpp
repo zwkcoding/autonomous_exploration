@@ -188,7 +188,6 @@ public:
     {
         Rate loop_rate(4);
 
-        // zwk todo
 //		double current_gain = mCurrentMap_.getGainConst();
         double current_gain = initial_gain_;
 
@@ -462,7 +461,6 @@ public:
                 break;
             } else {
                 ROS_WARN("Got NO frontier after sparsing! Enlarging search area, BUT Sparsing operation is ERROR!!!");
-                // todo try something, enlarge search area or ...
                 roi_radius *= gainChangeFactor_;
                 ROS_INFO("ROI_radius was increased to: %f", roi_radius);
                 continue;
@@ -916,7 +914,7 @@ private:
 //        imshow("delete_obs", dst);
         findContours(dst, contours, hierarchy, CV_RETR_TREE, CV_CHAIN_APPROX_SIMPLE, Point2i(0, 0));
         drawContours(dst, contours, -1, 255, 1);
-        imshow("frontiers", dst);
+//        imshow("frontiers", dst);
 
         //计算轮廓矩
         std::vector<Moments> mu(contours.size());
@@ -942,8 +940,8 @@ private:
 //            putText(drawing, tam, Point(mc[i].x, mc[i].y), FONT_HERSHEY_SIMPLEX, 0.4, cvScalar(255, 0, 255), 1);
         }
         flip(drawing, drawing, 0);
-        namedWindow("Contours", CV_WINDOW_AUTOSIZE);
-        imshow("Contours", drawing);
+//        namedWindow("Contours", CV_WINDOW_AUTOSIZE);
+//        imshow("Contours", drawing);
 //        moveWindow("Contours", 1100, 20);
 
         if (0) {
